@@ -342,6 +342,7 @@ const modifier = (text) => {
 		}
 		// state.authorsNoteStorage = state.memory.authorsNote
 	}
+	text = onInput_ReputeX(text);
 	text = onInput_TAS(text);
 	return {
 		text

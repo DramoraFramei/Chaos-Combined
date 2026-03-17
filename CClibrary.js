@@ -95,6 +95,10 @@ globalThis.MainSettings = (class MainSettings {
 		IS_TAS_ENABLED_BY_DEFAULT: false
 			// (true or false)
 			,
+		// Is ReputeX Engine already enabled when the adventure begins?
+		IS_REPUTEX_ENABLED_BY_DEFAULT: false
+			// (true or false)
+			,
 	}; //——————————————————————————————————————————————————————————————————————————————
 
 	/**
@@ -639,6 +643,10 @@ function InnerSelf(hook) {
 		IS_TAS_ENABLED_BY_DEFAULT: false
 			// (true or false)
 			,
+		// Is ReputeX Engine already enabled when the adventure begins?
+		IS_REPUTEX_ENABLED_BY_DEFAULT: false
+			// (true or false)
+			,
 	}; //——————————————————————————————————————————————————————————————————————————————
 
 	const version = "v1.0.2";
@@ -1106,6 +1114,12 @@ function InnerSelf(hook) {
 						message: "Install TRUE AUTOMATIC STATS (TAS):",
 						...factory(
 							"tas", S.IS_TAS_ENABLED_BY_DEFAULT
+						)
+					},
+					{
+						message: "Install ReputeX Engine:",
+						...factory(
+							"reputex", S.IS_REPUTEX_ENABLED_BY_DEFAULT
 						)
 					},
 					{
@@ -1696,9 +1710,13 @@ function InnerSelf(hook) {
 			} catch (error) {
 				log(error.message);
 			}
+		} else if (config.reputex) {
+			// ReputeX Engine runs via CCinput/CCoutput/CCcontext hooks (no Inner Self context call)
+			// Sync state for CC scripts
 		}
-		// Sync state.tasEnabled for CCinput/CCoutput/CCcontext TAS hooks (only enabled scripts run)
+		// Sync state for CCinput/CCoutput/CCcontext hooks (only enabled scripts run)
 		state.tasEnabled = !!config.tas;
+		state.reputexEnabled = !!config.reputex;
 		if (!config.allow) {
 			// Early exit if Inner Self is disabled
 			IS.encoding = "";
@@ -33519,6 +33537,2541 @@ function onLibrary_NGO() {
 
 		// Write back the canonical setting line so players see the current state
 		card.entry = `enabled = ${String(state.ngoEnabled)}`;
+	}
+}
+
+// ReputeX Engine Library Script (ReputeX Shared Library integrated)
+
+// === Shared Library: ReputeX Engine===
+// === Credit & Collaboration ===
+// This engine was built in collaboration with Lothens, whose Personal Reputation Tracker formed a core part of the system’s design.
+// With calls to Auto-Cards in the Input/context/output scripts, originally developed by LewdLeah.
+// Deep thanks to both creators for their contributions—this system would not exist without their foundational work.
+
+//--for time card--
+const TIME_CARD_NAME = "Time Control";
+const TIME_CARD_HEADER = "## Time & Date";
+//--for birthday card--
+const BIRTHDAY_CARD_NAME = "Birthdays";
+const BIRTHDAY_CARD_HEADER = "## Birthdays"; 
+//--for inventory card--
+const INVENTORY_CARD_NAME = "Inventory";
+const INVENTORY_CARD_HEADER = "## Inventory";
+//--for persnal rep card--
+const PERSONAL_REP_CARD_NAME = "Personal Reputation";
+const PERSONAL_REP_CARD_HEADER = "## Personal Reputation";
+//--for world rep card--
+const WORLD_REP_CARD_NAME = "World Reputation";
+const WORLD_REP_CARD_HEADER = "## World Reputation";
+//--for month/date--
+ const MONTH_DAYS = [31,28,31,30,31,30,31,31,30,31,30,31];
+//--Your world Lore and Location data--
+const LORE = {
+/**
+ * LORE is a nested dictionary that defines location-specific flavor text for various regions in Hyrule.
+ * Each top-level key represents a location the player can visit (e.g., "Lake Hylia", "Death Mountain").
+ * Each location contains subkeys representing the speaker's origin or perspective (e.g., "Ordon Village", "Castle Town", or the location itself).
+ *
+ * Structure:
+ * {
+ *   [LocationName]: {
+ *     default: "Fallback description if no specific origin is matched.",
+ *     [OriginName]: "Custom description from the perspective of someone from that origin."
+ *   },
+ *   ...
+ * }
+ *
+ * Usage:
+ * - Use `default` as a generic fallback when the speaker's origin is unknown or not explicitly handled.
+ * - Add new origin keys as needed to support more perspectives (e.g., "Gerudo Desert", "Snowpeak").
+ * - Descriptions should be immersive, setting-appropriate, and reflect the speaker's familiarity or bias.
+ * - Keep tone consistent with the world’s lore — poetic, mysterious, grounded in regional knowledge.
+ *
+ * Example:
+ * LORE["Lake Hylia"]["Castle Town"] returns a rich, lore-driven description of Lake Hylia from someone in Castle Town.
+ *
+ * Notes:
+ * - Avoid duplicating descriptions across origins unless intentional.
+ * - Keep entries short (1–2 sentences), evocative, and readable.
+ * - This object powers dynamic dialogue and environmental narration — clarity and mood matter.
+ */
+}
+
+//--factions--
+const FACTION_DEFS = {
+/**
+ * FACTION_DEFS is a registry of all major and minor factions in the world.
+ * Each faction entry defines its identity, relationships, and reputation bounds.
+ *
+ * Structure:
+ * {
+ *   [FactionName]: {
+ *     emoji: "Symbol representing the faction (used in UI/logs).",
+ *     rivals: ["List", "of", "faction", "names"], // factions this group opposes
+ *     min: -100, // lowest possible reputation value
+ *     max: 100,  // highest possible reputation value
+ *     hidden: true|false // optional: if true, faction starts inactive/unknown
+ *   },
+ *   ...
+ * }
+ *
+ * Usage:
+ * - Reputation values track how the player (or world) stands with each faction.
+ * - `emoji` provides a quick visual shorthand for UI, dialogue, or logs.
+ * - `rivals` defines natural opposition; reputation shifts with one may affect the other.
+ * - `min` and `max` set the reputation range (default: -100 to 100).
+ * - `hidden` can be used for emergent or secret factions that unlock later.
+ *
+ * Example:
+ * FACTION_DEFS["HyruleRoyalFamily"].emoji → "👑"
+ * FACTION_DEFS["TwiliShadowCouncil"].rivals → ["HyruleRoyalFamily","SheikahOrder"]
+ */
+};
+
+const FACTION_EMOJIS = {
+ /* FACTION_EMOJIS is a convenience map for quick lookups when only the symbol is needed.
+ *
+ * Notes for creators:
+ * - Add new factions by following the same structure.
+ * - Keep names consistent across FACTION_DEFS and FACTION_EMOJIS.
+ * - Use evocative emojis that match the faction’s theme/personality.
+ * - Balance rivalries carefully — too many cross-links can make reputation shifts chaotic.
+ */
+
+};
+//--reputation--
+  const DEFAULT_REPUTATION = {
+    global: 0,
+    categories: {
+      warlike: 0,
+      diplomatic: 0,
+      merciful: 0,
+      ruthless: 0,
+      noble: 0,
+      deceptive: 0
+    }
+  };
+
+ const REPUTATION_CATS = [
+    "Charming", "Honorable", "Rogueish", "Dominant", "Submissive", "Pranksterish",
+    "Curious", "Innocent", "Mischievous", "Affectionate", "Defiant",
+    "Brave", "Clever", "Playful"
+  ];
+
+const DAILY_EVENTS = [
+ /**
+ * EVENT SCRIPTS — World Time & Seasonal Flavor
+ *
+ * These arrays define immersive events that occur on different time scales:
+ * - DAILY_EVENTS: repeat every in‑game day at fixed times
+ * - MONTHLY_EVENT_POOL: random flavor events that can be drawn once per month
+ * - YEARLY_EVENTS: fixed annual or year‑specific events that anchor the timeline
+ *
+ * -------------------------
+ * DAILY_EVENTS
+ * -------------------------
+ * Structure:
+ * { hour: Number, minute: Number, text: "Description of what happens" }
+ *
+ * - Triggers at the same time every in‑game day.
+ * - Use emojis for quick visual cues (🌅 sunrise, 🛠️ work, 🌙 night patrol).
+ * - Keep text short (1–2 sentences), evocative, and tied to village life or world rhythm.
+ *
+ * Example:
+ * { hour: 6, minute: 0, text: "🌅 The sun rises, and the village slowly stirs awake." }
+ */
+];
+
+
+const MONTHLY_EVENT_POOL = [
+/* -------------------------
+ * MONTHLY_EVENT_POOL
+ * -------------------------
+ * Structure:
+ * [ "Single‑line description of a special monthly event", ... ]
+ *
+ * - Represents rare or seasonal happenings that can be randomly selected each month.
+ * - Use to add variety and surprise (festivals, traveling merchants, omens, etc.).
+ * - Keep entries flexible and non‑time‑specific (they’ll be slotted into the calendar dynamically).
+ *
+ * Example:
+ * "A traveling merchant from Kakariko arrives with exotic wares."
+ */
+];
+
+
+
+const YEARLY_EVENTS = [
+ /* -------------------------
+ * YEARLY_EVENTS
+ * -------------------------
+ * Structure:
+ * { year?: Number, month: Number, day: Number, hour: Number, text: "Event description", tag?: "OptionalID" }
+ *
+ * - Anchors the world to recurring festivals, solstices, or story‑driving one‑offs.
+ * - If `year` is omitted → event repeats annually (e.g., Harvest Festival).
+ * - If `year` is included → event is unique to that year (e.g., rebellion, comet, royal decree).
+ * - `tag` is optional: use it to track or trigger quest hooks, story beats, or conditional logic.
+ *
+ * Example:
+ * { month: 9, day: 30, hour: 17, text: "🍇 The Harvest Feast fills the villages with food, song, and gratitude.", tag: "HarvestFestival" }
+ *
+ * -------------------------
+ * Notes for Creators:
+ * - Add new events by following the same structure.
+ * - Keep descriptions immersive but concise — they should read like ambient world flavor or narrative hooks.
+ * - Balance mundane life (daily bread, school bells) with mystical or political beats (omens, decrees, rebellions).
+ * - Use emojis consistently to make events scannable in logs or UI.
+ * - YEARLY_EVENTS can drive major story arcs; DAILY and MONTHLY keep the world feeling alive in between.
+ */
+];
+
+const SPECIAL_EVENTS = [
+/**
+ * SPECIAL_EVENTS & MINI_EVENTS — Narrative Triggers
+ *
+ * These arrays define immersive, location‑based events that enrich exploration.
+ *
+ * -------------------------
+ * SPECIAL_EVENTS
+ * -------------------------
+ * Structure:
+ * {
+ *   key: "Unique identifier (string, camelCase)",
+ *   location: "Location name (must match a key in LORE or world map)",
+ *   text: "Narrative description shown when the event triggers",
+ *   onceOnly: true|false // if true, event only happens the first time
+ * }
+ *
+ * - SPECIAL_EVENTS are **major, one‑time story beats** tied to key locations.
+ * - Use them to mark first visits, discoveries, or pivotal narrative moments.
+ * - `key` must be unique (used for tracking completion).
+ * - `onceOnly: true` ensures the event won’t repeat after being triggered.
+ *
+ * Example:
+ * {
+ *   key: "visitLakeHylia",
+ *   location: "Lake Hylia",
+ *   text: "You arrive at Lake Hylia for the first time...",
+ *   onceOnly: true
+ * }
+ */
+];
+
+const MINI_EVENTS = [
+  /**
+ * -------------------------
+ * MINI_EVENTS
+ * -------------------------
+ * Structure:
+ * {
+ *   key: "Unique identifier (string, camelCase)",
+ *   location: "Location name (must match a key in LORE or world map)",
+ *   text: "Short narrative description of the activity",
+ *   reward: "Outcome (item, boost, reputation, clue, etc.)"
+ * }
+ *
+ * - MINI_EVENTS are **repeatable, small‑scale activities** that add flavor and rewards.
+ * - They represent side interactions: fishing, helping villagers, exploring ruins, etc.
+ * - `reward` should be short and descriptive, not mechanical code (e.g., “minor reputation boost”).
+ * - Keep text evocative but concise (1–2 sentences).
+ *
+ * Example:
+ * {
+ *   key: "fishingLakeHylia",
+ *   location: "Lake Hylia",
+ *   text: "You try your hand at fishing along the lake...",
+ *   reward: "Fish or small item"
+ * }
+ *
+ * -------------------------
+ * Notes for Creators:
+ * - Always ensure `location` matches an existing world location.
+ * - Use SPECIAL_EVENTS for **first‑time milestones**; use MINI_EVENTS for **repeatable flavor**.
+ * - Keep `key` names consistent and descriptive (location + action).
+ * - Balance rewards: small boosts for MINI_EVENTS, narrative weight for SPECIAL_EVENTS.
+ * - Emojis in text are optional but help readability and mood.
+ */
+];
+
+const URT_LEXICON = {
+    warlike: [/\battack\b/i, /\bdestroy\b/i, /\braid\b/i, /\bbombard\b/i, /\bexecute\b/i],
+    diplomatic: [/\bnegotiate\b/i, /\bparley\b/i, /\btreaty\b/i, /\balliance\b/i, /\bsurrender\b/i],
+    merciful: [/\bspare\b/i, /\bheal\b/i, /\bsave\b/i, /\bprotect\b/i, /\brescue\b/i],
+    deceptive: [/\blie\b/i, /\btrick\b/i, /\bdeceive\b/i, /\bcon\b/i, /\bmanipulate\b/i],
+    noble: [/\boath\b/i, /\bswear\b/i, /\bhonor\b/i, /\bjustice\b/i, /\btruth\b/i],
+    ruthless: [/\bthreaten\b/i, /\bwarn\b/i, /\bintimidate\b/i]
+  };
+
+const REP_CATEGORY_CHANGES = {
+/**
+ * REP_CATEGORY_CHANGES — Reputation Modifiers by Action Category
+ *
+ * This object defines how different factions react to broad categories of player actions.
+ * Each category (e.g., "warlike", "diplomatic") maps to a set of factions with integer values
+ * indicating whether that faction approves (+1) or disapproves (‑1) of the action type.
+ *
+ * Structure:
+ * {
+ *   [CategoryName]: {
+ *     [FactionName]: +1 | -1 // positive = approval, negative = disapproval
+ *   },
+ *   ...
+ * }
+ *
+ * Usage:
+ * - When the player performs an action tagged with a category, apply the corresponding
+ *   reputation adjustments to each faction listed.
+ * - Values are typically ±1 for small shifts, but can be scaled if needed.
+ * - Categories represent moral/behavioral archetypes (warlike, diplomatic, merciful, etc.).
+ *
+ * Example:
+ * REP_CATEGORY_CHANGES["warlike"]["GoronClan"] → 1
+ *   → Gorons approve of warlike actions (they respect strength).
+ *
+ * Notes for Creators:
+ * - Add new categories to represent different moral or behavioral archetypes (e.g., "greedy", "pious").
+ * - Add or remove factions within categories to reflect their cultural values.
+ * - Keep values small (±1) for incremental changes; larger values can cause extreme shifts too quickly.
+ * - Ensure faction names match those defined in FACTION_DEFS.
+ * - Use comments to explain why each faction reacts the way it does (helps maintain consistency).
+ *
+ * Design Philosophy:
+ * - This system creates **organic reputation dynamics**: one action can please some factions
+ *   while angering others, reinforcing the sense of a living, opinionated world.
+ */
+};
+
+ // --- LEXICON: Personal Reputation Tags ---
+const PERSONAL_REP_PATTERNS = [
+    // 🦸 Big Heroics (Huge Boosts)
+    { regex: /\b(dove in front of (the|a) blade|pushed (someone|them|a child) out of harm's way|threw (them|someone|a child) to safety|shielded (them|someone|the innocent)|leapt to save|saved (a|the) life|risked (your|his|her|their) life for|stood between (danger|the attacker|the mob) and (someone|them)|took a blow meant for)\b/i, changes: { Honorable: 3, Brave: 3, Charmer: 2 } },
+
+    // ⚖️ Justice Served (Public Deeds)
+    { regex: /\b(brought a murderer to justice|saved (the|a) town|publicly pardoned (an|the) accused|intervened to prevent (a|an) execution|forgave a sworn enemy|stopped a public duel|spared (the|an) enemy in front of all)\b/i, changes: { Honorable: 4, Charmer: 1, Dominant: 1 } },
+
+    // 🤝 Selfless Sacrifice
+    { regex: /\b(sacrificed (your|his|her|their) fortune for|gave up (your|his|her|their) claim for|renounced (a|the) title for another|chose exile for the sake of|gave away (all|most of) your gold|donated a lifesaving invention|chose poverty to protect)\b/i, changes: { Honorable: 4, Charmer: 2, Submissive: 1 } },
+
+    // 🦁 Fearless Stand
+    { regex: /\b(stood alone against overwhelming odds|defied (the|a) mob|refused to bow to a tyrant|faced (certain )?death without fear|publicly challenged (the|a) corrupt official|stood your ground against)\b/i, changes: { Brave: 4, Honorable: 2, Dominant: 2 } },
+
+    // 🧠 Great Ingenuity (Innovation/Rescue)
+    { regex: /\b(invented a device that saved lives|engineered a solution in crisis|built a bridge to rescue|created a cure in secret|outsmarted (the|a) villain with a new invention)\b/i, changes: { Clever: 3, Honorable: 2, Brave: 1 } },
+
+    // 🦹 Heinous Betrayal
+    { regex: /\b(betrayed a comrade|sold out (a|the) cause for gold|left (them|someone) to die|turned traitor for coin|struck down an innocent|conspired to assassinate|plotted to overthrow (the|a) leader)\b/i, changes: { Honorable: -5, Rogue: 5, Dominant: 2 } },
+
+    // 😈 Public Atrocity
+    { regex: /\b(burned a village|slaughtered prisoners|executed (a|the) child|committed (murder|atrocity) in public|ordered a massacre|condemned (the|a) innocent|forced a confession by torture)\b/i, changes: { Honorable: -5, Rogue: 3, Dominant: 3 } },
+
+    // 🗡️ Ruthless Ambition
+    { regex: /\b(ousted (your|his|her|their) rival by poison|framed (a|the) innocent|blackmailed (the|a) magistrate|forced (the|a) family into ruin|stole a fortune under (the|a) truce|bribed (the|a) official for power)\b/i, changes: { Rogue: 4, Dominant: 2, Honorable: -3 } },
+
+    // 💣 Rebellion & Treason (Negative)
+    { regex: /\b(incited (the|a) riot|led a rebellion for personal gain|betrayed (your|his|her|their) oath|collaborated with enemies of the crown|joined a coup for gold)\b/i, changes: { Rogue: 4, Defiant: 3, Honorable: -3 } },
+
+
+  // === 🧡 Charmer (positive & awkward/negative) ===
+  { regex: /\b(smile(?:s|d)?|grin(?:s|ned)?|blush(?:es|ed)?|flirt(?:s|ed|ing)?|gaze(?:s|d)?|wink(?:s|ed)?|affection(?:ate)?|charm(?:s|ed)?|caress(?:es|ed)?|stroke(?:s|d)?|calls [\w]+ (dear|love|sweetheart|handsome|beautiful)|sweetheart|darling|beloved|snuggle(?:s|d)?)\b/i, changes: { Charmer: 1 } },
+  { regex: /\b(sweetheart|darling|dear|beloved|precious|spoil(?:s|ed)?|pamper(?:s|ed|ing)?|dote(?:s|d)? on|face lights up|glows with joy|beaming smile|eyes sparkle|affectionately|gently|tenderly|warmly|holds hands?|embrace(?:s|d)?|cradle(?:s|d)?|non-verbal affection|holds gaze|light touch|brushed hair back|leans in|rest(?:s|ed)? head on|shared a smile|soft voice|gentle laugh|met (your|their) eyes|whispers softly|lively banter|compliments?|flatters?|sweet talk|offers? a rose|makes? a heart sign|friendly wink|friendly pat|wins? over)\b/i, changes: { Charmer: 1 } },
+  // Charmer, era/setting flavor
+  { regex: /\b(bows? elegantly|offers? a gloved hand|kisses? the back of a hand|presents? a flower|calls? you enchanting|bestows? a favor|sings? your praises|courts?|writes? a poem for|shares? a waltz|gives? a gallant nod|toasts? to your health|offers? a dance)\b/i, changes: { Charmer: 1 } },
+  // Charmer (awkward/negative)
+  { regex: /\b(awkward compliment|flirted and failed|creepy smile|unwelcome touch|makes it weird|stares too long|fumbles a compliment|tries too hard|calls someone (honey|babe) uninvited)\b/i, changes: { Charmer: -1 } },
+
+  // === 🛡️ Honorable (positive & negative) ===
+  { regex: /\b(thank(?:s| you)?|offers?|protect(?:s|ed)?|defend(?:s|ed)?|stand(?:s)? up(?: for)?|apolog(?:y|ize(?:s|d)?)|rescues?|generous|fair(?:ly)?|grants?|keeps? promise|truth(?:ful)?|gentle|grateful|selfless|provides?|looks after|respects?|keeps? their word|acts? with integrity|loyal|offers? honest advice|mediates?|takes? the blame|refuses? to cheat|tells? the truth|shows? mercy|refuses? bribe|restores? order|speaks? up for others|pays? a debt|returns? lost property)\b/i, changes: { Honorable: 1 } },
+  // Honorable, era/setting flavor
+  { regex: /\b(draws? a line|gives? their oath|swears? on (family|honor|ancestors|the gods)|bows? to elders|offers? a seat|stands vigil|defends? the innocent|duels? for justice|judges? fairly|declines? a bribe|stands? for tradition)\b/i, changes: { Honorable: 1 } },
+  // Honorable (negative/antithetical)
+  { regex: /\b(breaks? a promise|lies?|betrays?|cheats?|acts selfishly|takes? unfair advantage|lets? others down|abandons? a friend|accepts? bribe|frames? an innocent|steals? credit|ignores? suffering|acts dishonorably|cowardly|double-cross(?:es|ed)?|takes? the easy way out)\b/i, changes: { Honorable: -1 } },
+
+  // === 🦝 Rogue (positive & negative) ===
+  { regex: /\b(lie(?:s|d)?|steal(?:s|ing)?|cheat(?:s|ed)?|trick(?:s|ed)?|deceiv(?:es|ed)?|manipulat(?:es|ed)?|sneak(?:s|ed)?|smuggle(?:s|d)?|risky|selfish|betray(?:s|ed)?|sell out|backstab(?:s|bed)?|plots?|frames?|betrays trust|sabotag(?:es|ed)?|coldly walks away|spiteful|acts behind back|shifty|forges? a signature|slinks? away|smirks?|smokescreen|forged?|uses? a fake name|stole|swindled)\b/i, changes: { Rogue: 1, Honorable: -1 } },
+  // Rogue, era/setting flavor
+  { regex: /\b(cuts? a purse|picks? a lock|fakes? illness|hides? in shadows|dodges? the law|palm(?:s|ed)? an object|slips? away unseen|tells? a tall tale|uses? a code word|forges? a document)\b/i, changes: { Rogue: 1 } },
+  // Rogue (negative/antithetical)
+  { regex: /\b(caught red-handed|caught stealing|gets? caught lying|exposed for cheating|confesses? under pressure|too honest to bluff|sells? out a friend)\b/i, changes: { Rogue: -1 } },
+
+  // === 👑 Dominant (positive & negative) ===
+  { regex: /\b(order(?:s|ed)?|command(?:s|ed)?|grab(?:s|bed)? control|takes? charge|intimidat(?:es|ed)?|dominate(?:s|d)?|demands?|assert(?:s|ed)?|forces?|claim(?:s|ed)? authority|interrogates?|commands attention|takes the lead|issues ultimatum|sets the terms|makes demands|overrules objections|pushes forward|bosses? around|talks? over|interrupts?|shuts down dissent|leads? the charge|walks? ahead)\b/i, changes: { Dominant: 1, Submissive: -1 } },
+  // Dominant, era/setting flavor
+  { regex: /\b(declares? law|presides? over|draws? a line in the sand|dictates? terms|calls? for order|addresses? the crowd|steps? up first|claims? victory|ushers? everyone out|proclaims? leadership|announces? intent)\b/i, changes: { Dominant: 1 } },
+  // Dominant (negative/antithetical)
+  { regex: /\b(bullies?|abuses? power|shouts? others down|acts tyrannical|oversteps? bounds|ignores? advice|rejects? help|makes? arbitrary rule|forces? submission)\b/i, changes: { Dominant: -1 } },
+
+  // === 🙇 Submissive (positive & negative) ===
+  { regex: /\b(follow(?:s|ed)?|submit(?:s|ted)?|obey(?:s|ed)?|defer(?:s|red)?|yield(?:s|ed)?|agrees? softly|backs? down|accept(?:s|ed)? direction|reluctant(?:ly)? agrees?|tears up|lowers gaze|nods silently|quietly agrees|lets them win|whispers consent|backs off|lets? others decide|sits? quietly|bows? head|lets? someone else speak|agrees? with hesitation|steps? aside|asks? for permission)\b/i, changes: { Submissive: 1, Dominant: -1 } },
+  // Submissive, era/setting flavor
+  { regex: /\b(bows? deeply|serves? tea|offers? seat|waits? their turn|accepts? their role|kneels?|curtsies?|removes? hat respectfully|humbles? themselves|asks? to be excused)\b/i, changes: { Submissive: 1 } },
+  // Submissive (negative/antithetical)
+  { regex: /\b(defies? order|stands? up for self|refuses? to back down|contradicts? authority|acts independently|pushes? back|talks? back)\b/i, changes: { Submissive: -1 } },
+
+  // === 🤪 Prankster (positive & negative) ===
+  { regex: /\b(joke(?:s|d)?|tease(?:s|d)?|prank(?:s|ed)?|jest(?:s|ed)?|wry grin|mischief(?:ous)?|playful|laugh(?:s|ed)?|mock(?:s|ed)?|sarcastic remark|light-hearted insult|banter|goofy face|clowns around|pulls? a face|tells? a joke|switches? the salt|tricks? a friend|fake spider|hidden bucket|silly prank|practical joke|tells? a tall tale)\b/i, changes: { Prankster: 1, Honorable: -1 } },
+  // Prankster, era/setting flavor
+  { regex: /\b(slips? a frog in a pocket|ties? shoelaces together|puts? ink on a seat|draws? a mustache|surprises? with confetti|stages? a harmless ruse|plays? dead for a laugh)\b/i, changes: { Prankster: 1 } },
+  // Prankster (negative/antithetical)
+  { regex: /\b(causes? real harm|prank backfires|apologizes? for a joke|gets? caught pranking|offends?|hurts? feelings with joke|mockery goes too far)\b/i, changes: { Prankster: -1 } },
+
+  // === 👨‍👩‍👧‍👦 Parental (positive & negative) ===
+  { regex: /\b(daddy|mommy|papa|mama|my (daughter|son|child)|our baby|little one|sweet child|my girl|my boy|your mother|your father|tucks? in|checks? temperature|bandages?|makes? lunch|soothes?|wipes? tears|praises?|gives? a piggyback|teaches? a lesson|reads? a bedtime story|prepares? a meal|encourages?|scolds? gently)\b/i, changes: { Charmer: 1, Honorable: 1 } },
+  { regex: /\b(I'?ll always protect you|I'?ll keep you safe|I'm proud of you|I'm here for you|don't be scared|you're safe now|I love you so much|you can count on me|I won't let anything happen to you|you did so well|I'm so lucky to have you)\b/i, changes: { Charmer: 1, Honorable: 1 } },
+  // Parental (negative)
+  { regex: /\b(scolds? harshly|abandons? their child|breaks? a promise to a child|ignores? child's cry|forgets? birthday|shouts? at|punishes? unfairly)\b/i, changes: { Charmer: -1, Honorable: -1 } },
+
+  // === 🧠 Curious (Child-exclusive, + variants) ===
+  { regex: /\b(why\??|how come|asks? questions?|tilts? head|gazes? in wonder|peers? curiously|explores?|touches? gently|wide-eyed|asks? "what's that"|investigates?|examines?|wants? to know|seeks? answers|prods?|curiosity gets the better|asks? how things work)\b/i, changes: { Curious: 1 } },
+
+  // === 🤍 Innocent (Child-exclusive, + variants) ===
+  { regex: /\b(coo(?:s|ed|ing)?|gurgles?|soft noises?|little squeal|tiny gasp|soft babble|toothless grin|dimples?|baby sounds?|yawns?|innocent giggle|eyes widen|trusts? completely|untouched by worry|sees? the good in everyone|pure smile|blinks? up trustingly)\b/i, changes: { Innocent: 1 } },
+
+  // === 😈 Mischievous (Child-exclusive, + variants) ===
+  { regex: /\b(giggling after mischief|secretly hides something|playfully denies|sneaky look|gets into trouble|little troublemaker|messes with objects|draws on walls|plans? a prank|runs? off giggling|swaps? labels|tries? to sneak food|tiptoes?|sets? a trap|pretends? to be asleep|climbs? where forbidden)\b/i, changes: { Mischievous: 1 } },
+
+  // === 💞 Affectionate (Child-exclusive, + variants) ===
+  { regex: /\b(nuzzles?|snuggles?|rests? head on|hugs?|cuddles?|clings? to|reaches? up for|holds hands?|beams? with love|plants? a kiss|nestles? in arms|draws? a picture for|offers? a flower|brings? a gift|shares? toys|kisses? cheek)\b/i, changes: { Affectionate: 1 } },
+
+  // === 💢 Defiant (Child-exclusive, + variants) ===
+  { regex: /\b(says? no|refuses?|throws? a tantrum|crosses? arms|angrily stomps?|pouts?|talks? back|sulks?|glared?|rebels?|shouts? "no!"|refuses? to move|makes? a scene|defies? authority|resists? instruction|storms? off)\b/i, changes: { Defiant: 1 } },
+
+  // === 🦁 Brave (Child-exclusive, + variants) ===
+  { regex: /\b(faces? fear|holds? ground|protects?|stood? up|bold move|stood in front of|offers? to help|steps? forward|rescues? a friend|braves? the dark|fights? back|tries? again|asks? for a turn|defends? sibling|raises? hand to volunteer)\b/i, changes: { Brave: 1 } },
+
+  // === 🧠 Clever (Child-exclusive, + variants) ===
+  { regex: /\b(figures? out|solves?|finds? a way|clever trick|outsmarts?|smart idea|problem solved|puzzles? it out|invents?|engineers?|thinks? ahead|spots? a loophole|plays? a strategy|explains? the answer|guesses? right|makes? a plan)\b/i, changes: { Clever: 1 } },
+
+  // === 🎠 Playful (Child-exclusive, + variants) ===
+  { regex: /\b(giggles?|spins? around|dances?|jumps? out|hides? under blanket|chases?|pretends?|makes silly face|tickles?|starts? a game|plays? tag|hops?|laughs? for fun|jumps? in puddles|pretends? to fly|builds? a fort|spins? in circles)\b/i, changes: { Playful: 1 } }
+];
+
+(function ReputeX () {
+  // Ensure base state exists
+  if (!state.worldClock) {
+    state.worldClock = { year: 1454, month: 3, day: 27, hour: 19, minute: 0 };
+  }
+  if (!state.mood) state.mood = "calm";
+  if (!state._lastOutputText) state._lastOutputText = "";
+  if (!state._justErased) state._justErased = false;
+  if (!state._justUndid) state._justUndid = false;
+  if (typeof state.lastNarratedHour !== "number") state.lastNarratedHour = -1;
+  if (typeof state.lastMoodUpdateTime !== "number") state.lastMoodUpdateTime = 0;
+  if (typeof state.lastMoodShown !== "string") state.lastMoodShown = "";
+  if (typeof state.turnsSinceMoodLine !== "number") state.turnsSinceMoodLine = 0;
+  if (!state.pendingMinutes) state.pendingMinutes = 0;
+  state.factions = state.factions || { ...FACTION_DEFS };
+  if (!Array.isArray(state.inventory)) state.inventory = [];
+
+    ensureTimeCard();               // ensures the time card is always declared first
+    parseTimeCardEdits();           // read edits from the card
+    ensureWorldRepCard();           // ensures the World Rep Card is always declared first
+    checkScheduledEvents();         // checks for all events so they don't fire at 12:00AM
+    ensureBirthdayCard();           // ensures the birthday card is always declared first
+    ensureInventoryCard();          // ensures the inventory card is always declared first
+    recalcAgesFromCurrentDate();    // update ages based on new date
+    refreshBirthdayCard();          // update birthday card display
+    checkBirthdayEvents();          // ensures the AI knows its player birthday
+    updateTimeCard();               // write the time card back out
+    updateWorldRepCard();           // updates the world rep display
+    updateInventoryCard();          // updates the inventory display
+
+function adjustFactionReps(changes) {
+  state.factions = state.factions || { ...FACTION_DEFS };
+
+  for (const faction in changes) {
+    if (state.factions.hasOwnProperty(faction)) {
+      state.factions[faction] += changes[faction];
+    } else {
+      state.factions[faction] = changes[faction]; // create if missing
+    }
+  }
+
+  updateWorldRepCard(); // refresh Story Card after change
+}
+
+function onFactionLeadershipChange(newLeaderFaction) {
+  const changes = {};
+
+  // Big boost for your own faction
+  changes[newLeaderFaction] = randomInt(30, 50);
+
+  // Drop for rival factions
+  for (const faction in state.factions) {
+    if (faction !== newLeaderFaction) {
+      changes[faction] = randomInt(-50, -30);
+    }
+  }
+
+  adjustFactionReps(changes);
+  logFactionChange(changes);
+}
+
+function onFactionStartChoice(startFaction) {
+  const changes = {};
+
+  // Boost starting faction
+  changes[startFaction] = randomInt(15, 30);
+
+  // Slight drop for rivals
+  for (const faction in state.factions) {
+    if (faction !== startFaction) {
+      changes[faction] = randomInt(-10, -5);
+    }
+  }
+
+  adjustFactionReps(changes);
+  logFactionChange(changes);
+}
+
+function logFactionChange(changes) {
+  // Just update the card — rep has already been applied in adjustFactionReps()
+  updateWorldRepCard();
+
+  // Immersive hint
+  const affectedFactions = Object.keys(changes)
+    .map(f => FACTION_EMOJIS[f] ? `${FACTION_EMOJIS[f]} ${f}` : f);
+
+  if (affectedFactions.length > 0) {
+    state.message = `You sense a shift in your standing with ${affectedFactions.join(", ")}.`;
+  }
+}
+
+
+function onFactionChange(newFaction, oldFaction) {
+  const changes = {};
+
+  // Leaving old faction — drop standing
+  if (oldFaction && state.factions.hasOwnProperty(oldFaction)) {
+    changes[oldFaction] = randomInt(-30, -15);
+  }
+
+  // Joining new faction — boost standing
+  if (newFaction && state.factions.hasOwnProperty(newFaction)) {
+    changes[newFaction] = randomInt(20, 40);
+  }
+
+  adjustFactionReps(changes);
+  logFactionChange(changes);
+}
+
+
+function randomInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+
+  // --- Time Control Story Card ---
+  function ensureTimeCard() {
+    if (!Array.isArray(storyCards)) storyCards = [];
+    let card = storyCards.find(c => c?.title === TIME_CARD_NAME);
+    if (!card) {
+      card = {
+        type: "class",
+        title: TIME_CARD_NAME,
+        keys: TIME_CARD_NAME,
+        description: "Time and Date are accurate. You can now edit this card directly in the scenario to change the clock or mood.",
+        entry: `${TIME_CARD_HEADER}
+- Year: ${state.worldClock.year}
+- Month: ${state.worldClock.month}
+- Day: ${state.worldClock.day}
+- Time: ${String(state.worldClock.hour).padStart(2, "0")}:${String(state.worldClock.minute).padStart(2, "0")}
+- Mood: ${state.mood}`
+      };
+      storyCards.push(card);
+    }
+    return card;
+  }
+
+  function updateTimeCard() {
+    const card = ensureTimeCard();
+    const wc = state.worldClock;
+    let hour12 = wc.hour % 12 || 12;
+    let ampm = wc.hour < 12 ? "AM" : "PM";
+    const moodText = state.mood ? applyMoodTone("", state.mood).trim() : "";
+
+    card.entry = `${TIME_CARD_HEADER}
+- Year: ${wc.year}
+- Month: ${wc.month}
+- Day: ${wc.day}
+- Time: ${String(hour12).padStart(2, "0")}:${String(Number(wc.minute)).padStart(2, "0")} ${ampm}
+- Mood: ${state.mood}
+${moodText ? `> ${moodText}` : ""}`;
+  }
+
+  function parseTimeCardEdits() {
+  const card = storyCards.find(c => c?.title === TIME_CARD_NAME);
+  if (!card || !card.entry) return;
+
+  const lines = card.entry.split("\n");
+
+  lines.forEach(line => {
+    const clean = line.trim();
+
+    if (clean.startsWith("- Year:")) {
+      const val = parseInt(clean.replace("- Year:", "").trim(), 10);
+      if (!isNaN(val)) state.worldClock.year = val;
+    }
+    if (clean.startsWith("- Month:")) {
+      const val = parseInt(clean.replace("- Month:", "").trim(), 10);
+      if (!isNaN(val)) state.worldClock.month = val;
+    }
+    if (clean.startsWith("- Day:")) {
+      const val = parseInt(clean.replace("- Day:", "").trim(), 10);
+      if (!isNaN(val)) state.worldClock.day = val;
+    }
+    if (clean.startsWith("- Time:")) {
+      const timeMatch = clean.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+      if (timeMatch) {
+        let hour = parseInt(timeMatch[1], 10);
+        const minute = parseInt(timeMatch[2], 10);
+        const ampm = timeMatch[3].toUpperCase();
+        if (ampm === "PM" && hour < 12) hour += 12;
+        if (ampm === "AM" && hour === 12) hour = 0;
+        state.worldClock.hour = hour;
+        state.worldClock.minute = minute;
+      }
+    }
+    if (clean.startsWith("- Mood:")) {
+      const moodVal = clean.replace("- Mood:", "").trim().toLowerCase();
+      if (moodVal) state.mood = moodVal;
+    }
+  });
+}
+
+function recalcAgesFromCurrentDate() {
+  if (!state.worldClock) return;
+  const wc = state.worldClock;
+
+  for (const who in state.birthdays) {
+    const bd = state.birthdays[who];
+    // You need a birth year for exact age
+    if (!bd.year) continue;
+
+    let age = wc.year - bd.year;
+    // If birthday hasn't happened yet this year, subtract 1
+    if (wc.month < bd.month || (wc.month === bd.month && wc.day < bd.day)) {
+      age--;
+    }
+    state.ages[who] = age;
+  }
+}
+
+  // Helper: Is Leap Year?
+  function isLeapYear(year) {
+    return (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
+  }
+
+  // Helper: Days in Month
+  function daysInMonth(year, month) {
+    if (month === 2 && isLeapYear(year)) return 29;
+    return MONTH_DAYS[month-1];
+  }
+
+  // Advance time by X minutes, handling all rollovers
+function advanceTime(minutes) {
+  state.pendingMinutes += minutes;
+  let wc = state.worldClock;
+
+  wc.minute += state.pendingMinutes;
+  state.pendingMinutes = 0;
+
+  wc.minute = Number(wc.minute) || 0;
+
+  while (wc.minute >= 60) {
+    wc.minute -= 60;
+    wc.hour += 1;
+  }
+  while (wc.hour >= 24) {
+    wc.hour -= 24;
+    wc.day += 1;
+    if (typeof onNewDay === "function") onNewDay();
+  }
+  while (wc.day > daysInMonth(wc.year, wc.month)) {
+    wc.day -= daysInMonth(wc.year, wc.month);
+    wc.month += 1;
+    if (typeof onNewMonth === "function") onNewMonth();
+  }
+  while (wc.month > 12) {
+    wc.month -= 12;
+    wc.year += 1;
+    if (typeof onNewYear === "function") onNewYear();
+    updateTimeCard();
+  }
+
+  // ✅ Collect events
+  const events = checkScheduledEvents();
+
+  // ✅ Merge into your global output buffer
+  if (typeof output !== "undefined" && events.length > 0) {
+    output.push(...events);
+  }
+}
+
+function checkScheduledEvents() {
+  if (!state.worldClock) return [];
+  const wc = state.worldClock;
+  if (!state.firedEvents) state.firedEvents = {};
+
+  const messages = [];
+
+  // --- Yearly fixed events ---
+  for (const ev of YEARLY_EVENTS) {
+    const matchesYear = !ev.year || ev.year === wc.year;
+    if (matchesYear &&
+        wc.month === ev.month &&
+        wc.day === ev.day &&
+        wc.hour === ev.hour &&
+        wc.minute === (ev.minute || 0)) {
+      const key = `yearly-${wc.year}-${wc.month}-${wc.day}-${wc.hour}-${wc.minute||0}`;
+      if (!state.firedEvents[key]) {
+        state.firedEvents[key] = true;
+        messages.push(ev.text);
+        if (ev.tag) applyFactionAfterEvent(ev.tag);
+      }
+    }
+  }
+
+  // --- Monthly RNG events ---
+  if (state.monthlyEventDays &&
+      state.monthlyEventDays.includes(wc.day) &&
+      wc.hour === 9 && wc.minute === 0) {
+    const key = `monthly-${wc.year}-${wc.month}-${wc.day}`;
+    if (!state.firedEvents[key]) {
+      state.firedEvents[key] = true;
+      const event = MONTHLY_EVENT_POOL[Math.floor(Math.random() * MONTHLY_EVENT_POOL.length)];
+      messages.push(`📅 ${event}`);
+    }
+  }
+
+  // --- Daily events ---
+  for (const ev of DAILY_EVENTS) {
+    if (wc.hour === ev.hour && wc.minute === (ev.minute || 0)) {
+      const key = `daily-${wc.year}-${wc.month}-${wc.day}-${ev.hour}-${ev.minute||0}`;
+      if (!state.firedEvents[key]) {
+        state.firedEvents[key] = true;
+        messages.push(ev.text);
+        if (ev.tag) applyFactionAfterEvent(ev.tag);
+      }
+    }
+  }
+
+  // --- Daily 06:00 drift ---
+  if (wc.hour === 6 && wc.minute === 0) {
+    const key = `facdrift-${wc.year}-${wc.month}-${wc.day}`;
+    if (!state.firedEvents[key]) {
+      state.firedEvents[key] = true;
+      tickFactionDrift();
+    }
+  }
+
+  // --- Monthly flux on day 3 at 09:00 ---
+  if (wc.day === 3 && wc.hour === 9 && wc.minute === 0) {
+    const key = `facflux-${wc.year}-${wc.month}`;
+    if (!state.firedEvents[key]) {
+      state.firedEvents[key] = true;
+      monthlyFactionFlux();
+    }
+  }
+
+  return messages;
+}
+
+function ensureFaction(name, initial = 0) {
+  state.factions = state.factions || { ...FACTION_DEFS };
+  if (!(name in state.factions)) {
+    state.factions[name] = initial;
+  }
+}
+
+function removeFaction(name) {
+  // Prefer soft‑remove to avoid breaking references
+  state._retiredFactions = state._retiredFactions || {};
+  if (name in state.factions) {
+    state._retiredFactions[name] = state.factions[name];
+    delete state.factions[name];
+  }
+  updateWorldRepCard();
+}
+
+function clampFaction(name) {
+  const def = FACTION_DEFS[name] || { min: -100, max: 100 };
+  state.factions[name] = Math.max(def.min, Math.min(def.max, state.factions[name]));
+}
+
+function nudgeFaction(name, delta) {
+  ensureFaction(name);
+  state.factions[name] += delta;
+  clampFaction(name);
+}
+
+function setFactionVisible(name, visible = true) {
+  state._factionVisibility = state._factionVisibility || {};
+  state._factionVisibility[name] = visible;
+}
+// Call once per day at 06:00 (or any fixed time) from checkScheduledEvents
+function tickFactionDrift() {
+  if (!state.worldClock) return;
+  state.factions = state.factions || { ...FACTION_DEFS };
+  state._factionVisibility = state._factionVisibility || {};
+
+  const wc = state.worldClock;
+
+  // Seasonal modifiers (tiny nudges)
+  const seasonBoosts = {
+    spring: ["SeasonalFaction"],
+    summer: ["SeasonalFaction"],
+    autumn: ["SeasonalFaction"],
+    winter: ["SeasonalFaction"]
+  };
+  const season = getSeason(wc.month); // spring/summer/autumn/winter
+
+  for (const faction in state.factions) {
+    // Baseline regression toward 0 (stability)
+    const score = state.factions[faction];
+    const towardZero = score === 0 ? 0 : (score > 0 ? -1 : 1); // 1 point back toward neutral
+    nudgeFaction(faction, towardZero);
+
+    // Seasonal +1 for themed groups
+    if (seasonBoosts[season]?.includes(faction)) nudgeFaction(faction, +1);
+
+    // Rival tension: if a rival is strongly positive, apply slight negative drift
+    const rivals = FACTION_DEFS[faction]?.rivals || [];
+    let rivalPressure = 0;
+    for (const r of rivals) {
+      if (state.factions[r] >= 40) rivalPressure -= 1;
+    }
+    if (rivalPressure) nudgeFaction(faction, rivalPressure);
+  }
+
+  updateWorldRepCard();
+}
+
+function getSeason(month) {
+  if (month === 12 || month <= 2) return "winter";
+  if (month <= 5) return "spring";
+  if (month <= 8) return "summer";
+  return "autumn";
+}
+
+// Call once per month at 09:00 on day 3 (or inside onNewMonth)
+function monthlyFactionFlux() {
+  state.factions = state.factions || { ...FACTION_DEFS };
+
+  // Rising: 20% chance to introduce a hidden faction if conditions are favorable
+  const emergents = Object.keys(FACTION_DEFS).filter(n =>
+    FACTION_DEFS[n].hidden && !(n in state.factions)
+  );
+  if (emergents.length && Math.random() < 0.2) {
+    const name = emergents[Math.floor(Math.random() * emergents.length)];
+    ensureFaction(name, randomInt(5, 15));
+    setFactionVisible(name, true);
+    if (typeof output !== "undefined") output.push(`📈 Rumors spread as ${name} steps into the spotlight.`);
+  }
+
+  // Falling: 10% chance to retire a faction whose score is very low
+  const vulnerable = Object.keys(state.factions).filter(n => state.factions[n] <= -60);
+  if (vulnerable.length && Math.random() < 0.1) {
+    const name = vulnerable[Math.floor(Math.random() * vulnerable.length)];
+    removeFaction(name);
+    if (typeof output !== "undefined") output.push(`📉 The influence of ${name} wanes until it fades from relevance.`);
+  }
+
+  updateWorldRepCard();
+}
+
+function applyFactionAfterEvent(tag) {
+  // Map event tags -> faction deltas
+  const map = {
+ /**
+ * EVENT → FACTION REPUTATION MAP
+ *
+ * This object defines how specific named events affect faction reputations.
+ * Each key corresponds to an event `tag` (from YEARLY_EVENTS or other systems),
+ * and its value is an object mapping factions to reputation shifts.
+ *
+ * Structure:
+ * {
+ *   [EventTag]: {
+ *     [FactionName]: +N | -N // positive = approval, negative = disapproval
+ *   },
+ *   ...
+ * }
+ *
+ * Usage:
+ * - When an event with a matching `tag` occurs, apply the listed reputation changes.
+ * - Values represent the magnitude of the shift (e.g., +8 = strong approval, -6 = strong disapproval).
+ * - Multiple factions can be affected by the same event.
+ *
+ * Example:
+ * HarvestFestival: { KokiriTribe: +8, GoronClan: +3, ZoraDomain: +3 }
+ *   → Kokiri strongly approve (+8), Gorons and Zoras moderately approve (+3).
+ *
+ * Notes for Creators:
+ * - Ensure event `tag` names match those defined in YEARLY_EVENTS (or other event sources).
+ * - Keep values balanced: large swings (+/-10 or more) should be rare and tied to major story beats.
+ * - Use this map to reinforce faction identities:
+ *   • Kokiri favor festivals, harmony, and nature.
+ *   • Twili approve of shadow/mystical events, but others may disapprove.
+ *   • Royal Family cares about order, taxes, and tournaments.
+ * - Add new entries as you introduce new event tags.
+ *
+ * Design Philosophy:
+ * - This system ties **world events** directly to **faction reputation shifts**,
+ *   making the world feel reactive and interconnected.
+ */
+
+  };
+  const changes = map[tag];
+  if (!changes) return;
+  adjustFactionReps(changes);
+  logFactionChange(changes);
+}
+
+  function getClockString() {
+    const wc = state.worldClock;
+    return `Year ${wc.year}, ${String(wc.month).padStart(2,"0")}-${String(wc.day).padStart(2,"0")} ${String(wc.hour).padStart(2,"0")}:${String(wc.minute).padStart(2,"0")}`;
+  }
+
+// --- Birthday + Events ---
+state.birthdays = {
+  player: { year: 1454, month: 3, day: 27 },
+  mother: { year: 1427, month: 8, day: 14 },
+  father: { year: 1427, month: 5, day: 9 },
+};
+
+if (!state.ages) state.ages = {
+  player: 0,
+  mother: 28,
+  father: 27,
+};
+
+function getAgeBracket(age) {
+  if (age < 2) return "infant";
+  if (age < 12) return "child";
+  if (age < 18) return "teen";
+  if (age < 60) return "adult";
+  return "elder";
+}
+
+function ensureBirthdayCard() { 
+  if (!Array.isArray(storyCards)) storyCards = []; 
+  let card = storyCards.find(c => c?.title === BIRTHDAY_CARD_NAME); 
+  if (!card) { 
+    card = { 
+      type: "class", 
+      title: BIRTHDAY_CARD_NAME, 
+      keys: BIRTHDAY_CARD_HEADER, 
+      description: "Special days when characters age and celebrate.", 
+      entry: "" 
+    }; 
+    storyCards.push(card); 
+  } 
+  refreshBirthdayCard(); // Always populate
+  return card; 
+}
+
+function refreshBirthdayCard() {
+  if (!state.worldClock) return; // avoid running before clock exists
+
+  // ✅ Always recalc ages from the current date
+  recalcAgesFromCurrentDate();
+
+  const wc = state.worldClock;
+  const bCard = storyCards.find(c => c?.title === BIRTHDAY_CARD_NAME);
+  let lines = [];
+
+  for (const who in state.birthdays) {
+    const bd = state.birthdays[who];
+    const age = state.ages[who] || 0;
+    const isToday = (wc.month === bd.month && wc.day === bd.day);
+    const dateStr = `${String(bd.month).padStart(2,"0")}-${String(bd.day).padStart(2,"0")}`;
+    const bracket = getAgeBracket(age);
+
+    if (isToday) {
+      lines.push(`🎉 **${who}** — ${dateStr} — Age: ${age} (${bracket}) — 🎂 Today!`);
+    } else {
+      lines.push(`**${who}** — ${dateStr} — Age: ${age} (${bracket})`);
+    }
+  }
+
+  bCard.entry = `${BIRTHDAY_CARD_HEADER}\n` + lines.join("\n");
+}
+
+function checkBirthdayEvents() {
+  if (!state.worldClock || !state.birthdays) return;
+
+  const wc = state.worldClock;
+  const playerBD = state.birthdays.player;
+
+  if (playerBD && wc.month === playerBD.month && wc.day === playerBD.day) {
+    // Only trigger once per in-game day
+    if (state._birthdayAnnounced !== `${wc.year}-${wc.month}-${wc.day}`) {
+      state._birthdayAnnounced = `${wc.year}-${wc.month}-${wc.day}`;
+      if (typeof output !== "undefined") {
+        output.push(`🎂 Happy Birthday, player! You are now ${state.ages.player} (${getAgeBracket(state.ages.player)}). The world feels a little brighter today.`);
+      }
+    }
+  }
+}
+
+function onNewDay() {
+  let wc = state.worldClock;
+  let birthdayLines = [];
+
+  for (const who in state.birthdays) {
+    let bd = state.birthdays[who];
+    if (wc.month === bd.month && wc.day === bd.day) {
+      state.ages[who] = (state.ages[who] || 0) + 1;
+
+      if (who === "player") {
+        birthdayLines.push(`🎉 Happy Birthday, ${who}! You are now ${state.ages[who]} (${getAgeBracket(state.ages[who])}). Today feels special in a way only you can feel.`);
+      } else {
+        birthdayLines.push(`🎉 It's ${who}'s birthday! They are now ${state.ages[who]} (${getAgeBracket(state.ages[who])}).`);
+        state.mood = "hopeful";
+      }
+    }
+  }
+
+  refreshBirthdayCard(); // updates card with new ages
+
+  if (birthdayLines.length > 0 && typeof output !== "undefined") {
+    output.push(birthdayLines.join(" "));
+  }
+  if (typeof output !== "undefined") {
+    output.push(describeTimeNaturally(wc));
+  }
+  updateTimeCard();
+}
+
+function learnBirthday(name, month, day, age) {
+  if (!name || !month || !day) return; // prevent bad calls
+  state.birthdays[name] = { month, day };
+  state.ages[name] = age || 0;
+  refreshBirthdayCard();
+  if (typeof output !== "undefined") {
+    output.push(`📖 Learned ${name}'s birthday: ${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}, Age: ${state.ages[name]} (${getAgeBracket(state.ages[name])}).`);
+  }
+}
+
+// Initialize card on load
+ensureBirthdayCard();
+
+ function onNewMonth() {
+  let wc = state.worldClock;
+
+  // Pick 2 random days for this month
+  const days = daysInMonth(wc.year, wc.month);
+  let d1 = Math.ceil(Math.random() * days);
+  let d2;
+  do { d2 = Math.ceil(Math.random() * days); } while (d2 === d1);
+  state.monthlyEventDays = [d1, d2];
+
+  // Your existing flavor line
+  let eventLine = MONTHLY_EVENTS[(wc.month - 1) % MONTHLY_EVENTS.length];
+  if (typeof output !== "undefined") {
+    output.push(`📅 ${eventLine}`);
+    output.push(describeTimeNaturally(wc));
+  }
+  updateTimeCard();
+}
+
+function onNewYear() {
+  let wc = state.worldClock;
+  let eventLine = YEARLY_EVENTS[(wc.year - 1454) % YEARLY_EVENTS.length];
+
+  if (typeof output !== "undefined") {
+    output.push(`🎇 ${eventLine}`);
+    output.push(describeTimeNaturally(wc));
+  updateTimeCard();
+  }
+}
+
+// Trigger location-based events (can be called when the player enters a location)
+function triggerLocationEvent(location) {
+  if (!state.firedEvents) state.firedEvents = {};
+
+  for (const event of SPECIAL_EVENTS) {
+    if (event.location === location && !state.firedEvents[event.key]) {
+      state.firedEvents[event.key] = true;
+      if (typeof output !== "undefined") output.push(`🌟 ${event.text}`);
+    }
+  }
+}
+
+function getCompoundActionMinutes(text) {
+  let minutes = 0;
+  let matches = new Set();
+  for (const [regex, key] of actionRegexList) {
+    if (regex.test(text)) {
+      if (!matches.has(key)) {
+        const val = actionMinutes[key];
+        if (Array.isArray(val)) {
+          minutes += val[Math.floor(Math.random() * val.length)];
+        } else {
+          minutes += val || 0;
+        }
+        matches.add(key);
+      }
+    }
+  }
+  if (minutes === 0) {
+    const minor = actionMinutes.minor;
+    return Array.isArray(minor)
+      ? minor[Math.floor(Math.random() * minor.length)]
+      : minor || 1;  
+  }
+  return minutes;
+}
+
+// --- Inventory Story Card ---
+function ensureInventoryCard() {
+  if (!Array.isArray(storyCards)) storyCards = [];
+  let card = storyCards.find(c => c?.title === INVENTORY_CARD_NAME);
+  if (!card) {
+    card = {
+      type: "class",
+      title: INVENTORY_CARD_NAME,
+      keys: INVENTORY_CARD_NAME,
+      description: "Your current items. You can edit this card directly to remove or add items if needed.",
+      entry: `${INVENTORY_CARD_HEADER}\n_(empty)_`
+    };
+    storyCards.push(card);
+  }
+  return card;
+}
+
+function updateInventoryCard() {
+  const card = ensureInventoryCard();
+  state.inventory = state.inventory || [];
+
+  if (state.inventory.length === 0) {
+    card.entry = `${INVENTORY_CARD_HEADER}\n_(empty)_`;
+  } else {
+    card.entry = `${INVENTORY_CARD_HEADER}\n` +
+      state.inventory.map(item => `- ${item}`).join("\n");
+  }
+ // Clear the "used" markers after showing them once
+  state._recentlyUsedItems = [];
+}
+
+function useItem(itemName) {
+  state.inventory = state.inventory || [];
+
+  const index = state.inventory.indexOf(itemName);
+  if (index === -1) {
+    state.message = `❌ You don't have a ${itemName}.`;
+    return;
+  }
+
+  // Apply effects based on the item
+  switch (itemName) {
+    case "Healing Herb":
+      state.stamina = Math.min((state.stamina || 100) + 20, 100);
+      state.message = "🌿 You used a Healing Herb. Stamina restored!";
+      state.inventory.splice(index, 1); // remove item
+      break;
+
+    case "Fresh Fish":
+      state.stamina = Math.min((state.stamina || 100) + 10, 100);
+      state.message = "🎣 You ate the Fresh Fish. Feeling energized!";
+      state.inventory.splice(index, 1);
+      break;
+
+    case "Goron Ruby":
+      state.strengthBoostTurns = 5;
+      state.message = "💎 You feel the Goron Ruby's power surge through you!";
+      // Not consumed — keep it
+      break;
+
+    case "Water Pearl":
+      state.swimSpeedBoostTurns = 5;
+      state.message = "🌊 The Water Pearl grants you swift movement in water!";
+      // Not consumed — keep it
+      break;
+
+    default:
+      state.message = `You used the ${itemName}, but nothing happened...`;
+      state.inventory.splice(index, 1);
+  }
+// At the very bottom of your script, after all functions are defined:
+updateInventoryCard();
+}
+
+ensureInventoryCard();
+updateInventoryCard();
+
+const actionMinutes = {
+  // Eating & drinking (Zelda foods)
+  eat: [10, 15, 25],        // Hylian Rations, Fruits, Fish
+  drink: [1, 2, 3],         // Water from springs or bottles
+  cook: [15, 20, 60],       // Cooking a stew, elixir, or roasted meat
+  clean: [10, 15, 25, 45],  // Tidying a house or stable
+  bathe: [5, 15, 25, 60, 120], // Bath in hot spring or river
+  wash: [5, 10, 20],        // Wash clothes, hands, or dishes
+  dress: [3, 5, 12],        // Don tunic, armor, or garb
+  groom: [3, 5, 7],         // Comb hair, adjust armor
+  brush: [3, 5, 10],        // Brush horse or hair
+
+  // Resting & sleeping
+  sleep: [120, 300, 480, 600], // Sleep in inn, house, or forest
+  nap: [15, 30, 45, 60],       // Quick nap under tree or shrine
+  meditate: [5, 10, 12, 15],   // Meditate at shrine or near pond
+
+  // Conversation & social
+  chat: [5, 10, 15],       // Talk to villagers or allies
+  talk: [3, 5, 10],         // Converse with NPC
+  argue: [5, 12, 25, 180],  // Dispute over rupees or quests
+  comfort: [5, 8, 12],      // Console a worried villager
+  teach: [15, 25, 45, 60],  // Teach combat, Sheikah lore, or crafting
+  scold: [3, 6],             // Chide a misbehaving Kokiri or Goron
+  debate: [10, 20, 45],      // Formal discussion in castle or market
+  joke: [2, 5],              // Tell a Hylian pun
+  lecture: [20, 30, 60, 120],// Lecture about duty or kingdom law
+  confess: [3, 8, 15, 25],   // Confess deeds to Zelda or a friend
+
+  // Family & care
+  feed: [5, 7, 10],          // Feed a child or horse
+  soothe: [7, 14, 21],       // Calm frightened villager
+  cuddle: [3, 6, 9, 12],     // Hug friend or child
+  hug: [3, 5],
+  kiss: [2],                 // Light peck to loved one
+  play: [10, 15, 30],        // Play with child or in Minigame
+  babysit: [30, 60],         // Watch a child in village
+  care: [3, 6, 9, 12, 18],   // Care for horse, companion, or child
+  rock: [5],                 // Rock baby or soothe creature
+  tuck: [5],                 // Tuck into bed
+  discipline: [7],           // Teach a lesson or guide
+
+  // Emotional
+  cry: [3, 5],               // Shed tears for loss or triumph
+  laugh: [2, 5],             // Laugh at joke or event
+  sulk: [5, 8, 12],          // Pout after defeat
+  reminisce: [5, 10, 15],    // Remember past adventures
+  daydream: [5, 7, 12],      // Imagine future quests
+  worry: [3, 5, 8],          // Worry about Hyrule or loved ones
+
+  // Travel & movement
+  walk: [5, 10, 15],         // Walk through village or field
+  run: [3, 4, 6],            // Dash from enemies
+  jog: [4, 6, 10],           // Jog through forest
+  hike: [12, 18, 25],        // Hike Death Mountain or hills
+  ride: [10, 15, 20],        // Ride Epona across Hyrule
+  sail: [20, 30, 45],        // Sail on Lake Hylia or sea
+  row: [12, 18, 25],         // Row a boat
+  climb: [5, 9, 15],         // Climb cliffs or towers
+  sneak: [4, 6, 10],         // Sneak past Moblins or Yiga
+  swim: [8, 12, 18],         // Swim rivers or lakes
+  fly: [15, 25, 40],         // Glide with Paraglider
+  explore: [12, 18, 25],     // Explore shrines, caves, forests
+
+  // Work & crafting
+  study: [15, 30, 45],       // Study ancient texts or Sheikah runes
+  work: [30, 60, 90],        // Farming, smithing, or helping villagers
+  write: [10, 20, 30],       // Journal, map notes, or letters
+  read: [10, 15, 25],        // Read scrolls or books
+  paint: [15, 30, 45],       // Sketch Hyrule landscapes
+  sculpt: [20, 40, 60],      // Carve Deku wood or stone
+  invent: [25, 50, 75],      // Craft gadgets or elixirs
+  build: [30, 45, 60],       // Build structures or bridges
+  repair: [10, 20, 30],      // Fix wagon, shield, or tools
+  sew: [10, 15, 25],         // Make garments or tunics
+  shop: [15, 30, 45],        // Buy or sell in marketplace
+  train: [20, 35, 50],       // Sword, archery, or shield training
+  plant: [10, 20, 30],       // Plant crops or seeds
+  harvest: [15, 22, 30],     // Harvest Hylian crops
+  mine: [30, 45, 60],        // Mine ore or gemstones
+  smith: [25, 50, 75],       // Forge swords, shields
+  brew: [10, 18, 25],        // Brew potions or elixirs
+  enchant: [15, 25, 40],     // Imbue weapons with magic
+  experiment: [15, 30, 45],  // Test gadgets or spells
+
+  // Leisure & fun
+  sing: [5, 8, 12],          // Sing folk songs or ocarina tunes
+  dance: [8, 12, 20],        // Dance at festivals
+  game: [10, 15, 25],        // Play mini-games (bombchu, shooting)
+  listenmusic: [5, 8, 12],   // Listen to melodies or ocarina
+  perform: [15, 25, 35],     // Perform for villagers
+  watch: [5, 10, 15],        // Watch events or creatures
+  fish: [15, 30, 45],        // Fish in rivers or lakes
+  picnic: [20, 40, 60],      // Picnic near lake or meadow
+  gamble: [10, 20, 30],      // Mini-game gambling (bombchu races)
+  drinkalcohol: [15, 30, 45],// Local ale or mead in tavern
+
+  // Combat & risk
+  fight: [5, 8, 12],         // Defend village or self
+  battle: [8, 10, 15],       // Fight bandits or monsters
+  spar: [8, 12, 20],         // Practice sword combat
+  duel: [10, 12, 20],        // Formal combat challenge
+  hunt: [20, 35, 50],        // Hunt wild animals or monsters
+  escape: [5, 7, 10],        // Flee enemies or trap
+  steal: [3, 5, 8],          // Pickpocket (thief or Yiga)
+  spy: [10, 15, 25],         // Scout enemies or stealth
+  patrol: [15, 25, 35],      // Guard village or castle walls
+
+  // Magic & fantasy
+  cast: [8, 12, 20],         // Cast spell from Sheikah slate
+  ritual: [20, 30, 45],      // Shrine rituals or blessing
+  summon: [10, 18, 25],      // Summon spirit or familiar
+  heal: [5, 8, 12],          // Heal with herbs or magic
+  bless: [3, 5, 8],          // Bless villagers or crops
+  curse: [5, 7, 10],         // Cast minor curse on foe
+  scry: [5, 10, 15],         // Divine vision or Sheikah surveillance
+  brewpotion: [10, 15, 25],  // Brew elixir or potion
+  commune: [8, 12, 20],      // Commune with spirits or Great Deku Tree
+  minor: [1, 2, 3]           // Small minor action
+};
+
+function getActionMinutes(action) {
+  const options = actionMinutes[action];
+  if (!options) return 0;
+  return Array.isArray(options)
+    ? options[Math.floor(Math.random() * options.length)]
+    : options;
+}
+
+  const actionRegexList = [
+  // Resting & sleeping
+  [/\bsleep\b|\bslumber\b|\brest\b/, 'sleep'],
+  [/\bnap\b|\bdoze\b/, 'nap'],
+
+  // Eating & drinking
+  [/\beat\b|\bmeal\b|\bfeast\b|\bHylian food\b|\bfruit\b|\bfish\b/, 'eat'],
+  [/\bdrink\b|\bsip\b|\bwater\b|\btea\b|\bjuice\b/, 'drink'],
+  [/\bdrink (ale|mead|local brew)\b/, 'drinkalcohol'],
+  [/\bcook\b|\broast\b|\bbake\b|\bprepare (stew|elixir)\b/, 'cook'],
+  [/\bclean\b|\btidy\b|\bsweep\b|\bscrub\b/, 'clean'],
+  [/\bbathe\b|\bhot spring\b|\briver\b|\bwash\b/, 'bathe'],
+  [/\bdress\b|\bput on (armor|tunic|clothes)\b/, 'dress'],
+  [/\bgroom\b|\bcomb\b|\bbrush hair\b/, 'groom'],
+  [/\bbrush (hair|mane|teeth)\b/, 'brush'],
+
+  // Conversation & social
+  [/\bchat\b|\btalk\b|\bconverse\b|\bspeak with\b|\bconversation\b/, 'chat'],
+  [/\bargue\b|\bdebate\b|\bdispute\b/, 'argue'],
+  [/\bcomfort\b|\breassure\b|\bconsole\b/, 'comfort'],
+  [/\bteach\b|\binstruct\b|\btrain\b/, 'teach'],
+  [/\bscold\b|\bchide\b|\bcorrect\b/, 'scold'],
+  [/\bjoke\b|\bjest\b|\bhumor\b|\bquips?\b/, 'joke'],
+  [/\blecture\b|\blong talk\b/, 'lecture'],
+  [/\bconfess\b|\badmit\b|\breveal secret\b/, 'confess'],
+
+  // Family & care
+  [/\bfeed\b|\bgive (food|fish|fruit)\b/, 'feed'],
+  [/\bsoothe\b|\bcalm\b|\bsettle\b/, 'soothe'],
+  [/\bcuddle\b|\bhug\b|\bembrace\b/, 'cuddle'],
+  [/\bkiss\b|\bpeck\b/, 'kiss'],
+  [/\bplay\b|\bmini[- ]game\b|\bfrolic\b/, 'play'],
+  [/\bbabysit\b|\bwatch (child|children)\b/, 'babysit'],
+  [/\bcare\b|\bnurse\b|\battend\b/, 'care'],
+  [/\brock (the|a) baby\b|\bcradle\b/, 'rock'],
+  [/\btuck( in)?\b/, 'tuck'],
+
+  // Emotional
+  [/\bcry\b|\bweep\b|\bsob\b/, 'cry'],
+  [/\blaugh\b|\bgiggle\b|\bchuckle\b/, 'laugh'],
+  [/\bsulk\b|\bmope\b|\bbrood\b/, 'sulk'],
+  [/\breminisce\b|\bremember\b|\breflect\b/, 'reminisce'],
+  [/\bdaydream\b|\bimagine\b/, 'daydream'],
+  [/\bmeditate\b|\bfocus\b/, 'meditate'],
+  [/\bworry\b|\banxious\b|\bfret\b/, 'worry'],
+
+  // Travel & movement
+  [/\bwalk\b|\bstroll\b|\bwander\b|\bamble\b/, 'walk'],
+  [/\brun\b|\bdash\b|\bsprint\b/, 'run'],
+  [/\bjog\b/, 'jog'],
+  [/\bhike\b|\bclimb mountain\b/, 'hike'],
+  [/\bride\b|\bmount Epona\b|\bhorseback\b/, 'ride'],
+  [/\bsail\b|\brow\b|\bboat\b|\blake\b|\bsea\b/, 'sail'],
+  [/\bclimb\b|\bscale\b|\bascend\b/, 'climb'],
+  [/\bsneak\b|\btiptoe\b|\bcreep\b/, 'sneak'],
+  [/\bswim\b|\bdive\b|\blake\b/, 'swim'],
+  [/\bfly\b|\bglide\b|\bparaglider\b/, 'fly'],
+  [/\bexplore\b|\bscout\b|\binvestigate\b|\bventure\b/, 'explore'],
+
+  // Work & crafting
+  [/\bstudy\b|\bread\b|\blearn\b|\bresearch\b|\bSheikah lore\b/, 'study'],
+  [/\bwork\b|\blabor\b|\btoil\b|\bforge\b/, 'work'],
+  [/\bwrite\b|\bcompose\b|\bjournal\b/, 'write'],
+  [/\bpaint\b|\bdraw\b|\bsketch\b/, 'paint'],
+  [/\bsculpt\b|\bcarve\b|\bmold\b/, 'sculpt'],
+  [/\binvent\b|\btinker\b|\bengineer\b/, 'invent'],
+  [/\bbuild\b|\bconstruct\b|\bbridge\b/, 'build'],
+  [/\brepair\b|\bfix\b|\bmend\b/, 'repair'],
+  [/\bsew\b|\bstitch\b|\bknit\b/, 'sew'],
+  [/\bshop\b|\bmarket\b|\bbuy\b|\bsell\b/, 'shop'],
+  [/\btrain\b|\bpractice\b|\bdrill\b|\bswordsmanship\b/, 'train'],
+  [/\bplant\b|\bgarden\b|\bcrop\b/, 'plant'],
+  [/\bharvest\b|\breap\b/, 'harvest'],
+  [/\bmine\b|\bdig\b|\bquarry\b/, 'mine'],
+  [/\bsmith\b|\bforge\b|\bblacksmith\b/, 'smith'],
+  [/\bbrew\b|\bdistill\b|\belixir\b/, 'brew'],
+  [/\benchant\b|\bimbue\b|\bmagic weapon\b/, 'enchant'],
+  [/\bexperiment\b|\btest\b|\bgadget\b/, 'experiment'],
+
+  // Leisure & fun
+  [/\bsing\b|\bhum\b|\bchant\b|\bocarina\b/, 'sing'],
+  [/\bdance\b|\bwaltz\b|\btwirl\b/, 'dance'],
+  [/\bgame\b|\bplay\b|\bmini[- ]game\b/, 'game'],
+  [/\blisten music\b|\bmusic\b|\bmelody\b/, 'listenmusic'],
+  [/\bperform\b|\bshow\b|\brecital\b/, 'perform'],
+  [/\bwatch\b|\bobserve\b/, 'watch'],
+  [/\bfish\b|\bfishing\b/, 'fish'],
+  [/\bpicnic\b|\bouting\b/, 'picnic'],
+  [/\bgamble\b|\bbet\b|\bwager\b|\bmini[- ]game\b/, 'gamble'],
+
+  // Combat & risk
+  [/\bfight\b|\bbrawl\b|\bscuffle\b|\bfend off\b/, 'fight'],
+  [/\bbattle\b|\bwar\b|\bskirmish\b/, 'battle'],
+  [/\bspar\b|\bpractice fight\b/, 'spar'],
+  [/\bduel\b|\bchallenge\b/, 'duel'],
+  [/\bhunt\b|\btrack\b|\bmonster hunt\b/, 'hunt'],
+  [/\bescape\b|\bflee\b|\brun away\b/, 'escape'],
+  [/\bsteal\b|\bpickpocket\b|\blift\b/, 'steal'],
+  [/\bspy\b|\beavesdrop\b|\bscout\b/, 'spy'],
+  [/\bpatrol\b|\bguard\b|\bwatch\b/, 'patrol'],
+
+  // Magic & fantasy
+  [/\bcast\b|\bspell\b|\bincant\b|\bmagic\b|\bSheikah slate\b/, 'cast'],
+  [/\britual\b|\bceremony\b|\bshrine rite\b/, 'ritual'],
+  [/\bsummon\b|\bconjure\b|\bcall spirit\b/, 'summon'],
+  [/\bheal\b|\bcure\b|\bmedicine\b/, 'heal'],
+  [/\bbless\b|\bbestow\b/, 'bless'],
+  [/\bcurse\b|\bhex\b/, 'curse'],
+  [/\bscry\b|\bdivine\b|\bsee future\b|\bSheikah vision\b/, 'scry'],
+  [/\bbrew (potion|elixir)\b|\bbrew\b/, 'brewpotion'],
+  [/\bcommune\b|\bspirit\b|\bghost\b|\bGreat Deku Tree\b/, 'commune'],
+];
+ 
+  function initWorldReputation(state) {
+    if (!state.factions) state.factions = { ...FACTION_DEFS };
+    if (!state.factionReputation) {
+      state.factionReputation = {};
+      for (const key in state.factions) {
+        state.factionReputation[key] = 0;
+      }
+    }
+  }
+
+  function initPersonalReputation(state) {
+    if (!state.reputation) state.reputation = {};
+    for (const cat of REPUTATION_CATS) {
+      if (typeof state.reputation[cat] !== "number") {
+        state.reputation[cat] = 0;
+      }
+    }
+  }
+
+function ensurePersonalRepCard() {
+  if (!Array.isArray(storyCards)) storyCards = [];
+  let card = storyCards.find(c => c?.title === PERSONAL_REP_CARD_NAME);
+  if (!card) {
+    card = {
+      type: "class",
+      title: PERSONAL_REP_CARD_NAME,
+      keys: PERSONAL_REP_CARD_NAME,
+      description: "Your current personal reputation traits. All traits cap out at -100, 100 and the AI is supposed to change the way it writes as it keeps track of the values",
+      entry: ""
+    };
+    storyCards.push(card);
+  }
+  return card;
+}
+
+function updatePersonalRepCard() {
+  const card = ensurePersonalRepCard();
+  const rep = state.reputation || {};
+  card.entry = `${PERSONAL_REP_CARD_HEADER}\n` +
+    Object.entries(rep)
+      .map(([trait, score]) => `- ${trait}: ${score}`)
+      .join("\n");
+}
+
+ensurePersonalRepCard();
+updatePersonalRepCard();
+
+// Make sure every faction has a numeric score in state.factions
+function ensureFactionScores() {
+  state.factions = state.factions || {};
+  for (const name in FACTION_DEFS) {
+    if (typeof state.factions[name] !== "number") {
+      state.factions[name] = 0; // default starting reputation
+    }
+  }
+}
+
+function ensureWorldRepCard() {
+  if (!Array.isArray(storyCards)) storyCards = [];
+  let card = storyCards.find(c => c?.title === WORLD_REP_CARD_NAME);
+  if (!card) {
+    card = {
+      type: "class",
+      title: WORLD_REP_CARD_NAME,
+      keys: WORLD_REP_CARD_NAME,
+      description: "Your standing with major factions.",
+      entry: ""
+    };
+    storyCards.push(card);
+  }
+  return card;
+}
+
+function updateWorldRepCard() {
+  ensureFactionScores(); // make sure scores exist
+  const card = ensureWorldRepCard();
+
+  state._lastFactionScores = state._lastFactionScores || {};
+  state._recentFactionChanges = state._recentFactionChanges || {};
+  state._factionVisibility = state._factionVisibility || {};
+
+  card.entry = `${WORLD_REP_CARD_HEADER}\n` +
+    Object.entries(state.factions)
+      .filter(([name]) => state._factionVisibility[name] !== false) // hide if explicitly false
+      .map(([faction, score]) => {
+        let arrow = "";
+        const prev = state._lastFactionScores[faction];
+
+        if (typeof prev === "number" && score !== prev) {
+          const diff = score - prev;
+          arrow = Math.abs(diff) >= 30 ? (diff > 0 ? " ↑↑" : " ↓↓") : (diff > 0 ? " ↑" : " ↓");
+          state._recentFactionChanges[faction] = 2;
+        } else if (state._recentFactionChanges[faction] > 0) {
+          const diff = score - (prev ?? score);
+          arrow = Math.abs(diff) >= 30 ? (diff > 0 ? " ↑↑" : diff < 0 ? " ↓↓" : "") : (diff > 0 ? " ↑" : diff < 0 ? " ↓" : "");
+          state._recentFactionChanges[faction]--;
+        }
+
+        state._lastFactionScores[faction] = score;
+        const emoji = FACTION_DEFS[faction]?.emoji || "";
+        return `- ${emoji} ${faction}: ${score}${arrow}`;
+      })
+      .join("\n");
+}
+
+
+// Call these after any world reputation change:
+ensureWorldRepCard();
+updateWorldRepCard();
+
+// === Immersive Formatter Helpers ===
+function describeTimeNaturally(wc) {
+  const h = wc.hour;
+  const mood = state.mood || "neutral";
+
+  // Base time-of-day scenes
+  const timeBlocks = {
+    dawn: [
+      "The first light of dawn spills across the horizon, chasing away the night’s chill.",
+      "A pale glow creeps over the rooftops, hinting at the day ahead.",
+      "Morning stirs slowly, the sky painted in soft pastels."
+    ],
+    morning: [
+      "The morning air feels fresh, carrying the quiet bustle of a world waking up.",
+      "Sunlight filters through leaves, dappling the ground in shifting patterns.",
+      "The streets hum with the rhythm of a day finding its pace."
+    ],
+    midday: [
+      "The sun hangs high, shadows short and sharp beneath its steady gaze.",
+      "Heat shimmers in the distance as midday claims the land.",
+      "The world feels suspended in the bright stillness of early afternoon."
+    ],
+    afternoon: [
+      "The afternoon drifts lazily, the light softening as the day begins to lean toward evening.",
+      "A golden haze settles over the streets, stretching shadows just a little longer.",
+      "The air cools gently, carrying the scent of the approaching dusk."
+    ],
+    sunset: [
+      "The sky glows in warm hues as the sun dips low, stretching shadows long across the ground.",
+      "A wash of amber and crimson paints the horizon.",
+      "The last light clings to the rooftops before surrendering to night."
+    ],
+    night: [
+      "Night settles in, the air cooling as distant lights flicker to life.",
+      "The streets quieten under the watch of a silver moon.",
+      "Shadows deepen, and the world takes on a hushed, secretive tone."
+    ],
+    lateNight: [
+      "The deep hours of night wrap the world in stillness, broken only by the faintest sounds.",
+      "Darkness reigns, pierced only by the occasional glimmer of starlight.",
+      "The world sleeps, save for the quiet rustle of unseen things."
+    ]
+  };
+
+  // Mood overlays for each time block
+  const moodOverlays = {
+    hopeful: {
+      dawn: ["The light feels like a promise kept.", "The air carries a quiet sense of possibility."],
+      morning: ["Every sound seems touched with purpose.", "The day feels like it’s leaning toward something bright."],
+      midday: ["Even the heat feels alive with opportunity.", "The light seems to urge you forward."],
+      afternoon: ["The golden light feels like a gentle encouragement.", "Shadows stretch, but they don’t feel threatening."],
+      sunset: ["The fading light feels like a warm farewell.", "The horizon glows with quiet optimism."],
+      night: ["Even the darkness feels gentle tonight.", "The stars seem to whisper of good things to come."],
+      lateNight: ["The stillness feels peaceful, not empty.", "Even in the dark, there’s a sense of safety."]
+    },
+    calm: {
+      dawn: ["The world wakes without hurry.", "The air is cool and steady."],
+      morning: ["The bustle feels muted, like a soft hum.", "The light falls evenly, without drama."],
+      midday: ["The heat is steady, unchanging.", "Shadows rest quietly under the sun."],
+      afternoon: ["The air is mild, the light unhurried.", "Everything seems to move at the same slow pace."],
+      sunset: ["The colors fade without urgency.", "The horizon softens into evening."],
+      night: ["The quiet feels complete, without unease.", "The moonlight rests gently on the ground."],
+      lateNight: ["The silence is whole and undisturbed.", "The darkness feels like a blanket."]
+    },
+    tense: {
+      dawn: ["The light cuts sharply through the mist.", "The air feels tight, as if holding back a storm."],
+      morning: ["Every sound seems sharper than it should be.", "The light feels too bright, too sudden."],
+      midday: ["The heat presses down like a weight.", "Shadows seem to cling to the edges of things."],
+      afternoon: ["The air feels charged, like something is about to happen.", "The light flickers uneasily through the trees."],
+      sunset: ["The colors burn more than they soothe.", "The horizon feels like it’s closing in."],
+      night: ["Every shadow feels like it’s watching.", "The quiet is too complete, too deliberate."],
+      lateNight: ["The darkness feels alert, listening.", "Every small sound seems magnified."]
+    },
+    despair: {
+      dawn: ["The light struggles to break the horizon.", "The air feels heavy, reluctant to move."],
+      morning: ["The bustle feels distant, unreachable.", "The light is pale and cold."],
+      midday: ["The sun glares without warmth.", "The air feels dry and empty."],
+      afternoon: ["The light fades too soon, as if retreating.", "Shadows seem to grow faster than they should."],
+      sunset: ["The colors bleed away into grey.", "The horizon swallows the light without ceremony."],
+      night: ["The darkness feels endless.", "The moonlight is thin and weak."],
+      lateNight: ["The silence feels hollow.", "The dark presses in from all sides."]
+    }
+  };
+
+  // Pick time block
+  let block;
+  if (h >= 5 && h < 8) block = "dawn";
+  else if (h >= 8 && h < 12) block = "morning";
+  else if (h >= 12 && h < 15) block = "midday";
+  else if (h >= 15 && h < 18) block = "afternoon";
+  else if (h >= 18 && h < 20) block = "sunset";
+  else if (h >= 20 && h < 23) block = "night";
+  else block = "lateNight";
+
+  // Base scene
+  let scene = timeBlocks[block][Math.floor(Math.random() * timeBlocks[block].length)];
+
+  // Add mood overlay if available
+  if (moodOverlays[mood] && moodOverlays[mood][block]) {
+    const overlay = moodOverlays[mood][block];
+    scene += " " + overlay[Math.floor(Math.random() * overlay.length)];
+  }
+
+  return scene;
+}
+
+function formatPersonalRepImmersive(delta) {
+  const positives = [];
+  const negatives = [];
+
+  for (const [trait, change] of Object.entries(delta)) {
+    if (change > 0) positives.push(trait.toLowerCase());
+    else if (change < 0) negatives.push(trait.toLowerCase());
+  }
+
+  const parts = [];
+  if (positives.length) {
+    const traitList = positives.length > 1
+      ? positives.slice(0, -1).join(", ") + " and " + positives.slice(-1)
+      : positives[0];
+    parts.push(`A quiet confidence stirs—you feel more ${traitList} than before.`);
+  }
+  if (negatives.length) {
+    const traitList = negatives.length > 1
+      ? negatives.slice(0, -1).join(", ") + " and " + negatives.slice(-1)
+      : negatives[0];
+    parts.push(`A flicker of doubt creeps in—you seem less ${traitList} than before.`);
+  }
+
+  return parts.join(" ");
+}
+
+function formatWorldRepImmersive(delta) {
+  return Object.entries(delta).map(([faction, change]) => {
+    if (change > 0) return `Whispers spread among the ${faction}—your name carries new weight.`;
+    if (change < 0) return `The ${faction} speak your name with less warmth than before.`;
+    return null;
+  }).filter(Boolean).join(" ");
+}
+
+function applyMoodTone(text, mood, opts = { includeLine: true }) {
+  if (!text || !mood) return text;
+
+  let rewritten = text;
+
+  // === 1️⃣ Lexical swaps ===
+  switch (mood) {
+    case "hopeful":
+      rewritten = rewritten.replace(
+        /([.!?])\s+|\b(small|dim|cold)\b/gi,
+        (match, punc, word) => punc ? punc + " " : "warm"
+      );
+      break;
+    case "calm":
+      rewritten = rewritten.replace(
+        /([.!?])\s+|\b(and|but|so)\b/gi,
+        (match, punc, word) => punc ? punc + " " : "and"
+      );
+      break;
+    case "tense":
+      rewritten = rewritten.replace(
+        /([.!?])\s+|\b(and|but|so)\b|,\s+/gi,
+        (match, punc, conj, comma) => punc ? punc + " " : conj ? "—" : ", "
+      ).trim();
+      break;
+    case "despair":
+      rewritten = rewritten.replace(
+        /([.!?])\s+|\b(light|bright)\b/gi,
+        (match, punc, word) => punc ? punc + "... " : "dim"
+      );
+      break;
+  }
+
+  // === 2️⃣ Rhythm tweaks ===
+  switch (mood) {
+    case "hopeful":
+      rewritten = rewritten.replace(/\. ([A-Z])/g, ", $1");
+      break;
+    case "calm":
+      rewritten = rewritten.replace(/—/g, " and ");
+      break;
+    case "tense":
+      rewritten = rewritten.replace(/, /g, " — ");
+      break;
+    case "despair":
+      rewritten = rewritten.replace(/, /g, "... ");
+      break;
+  }
+
+  // === 3️⃣ Randomized mood line weaving ===
+  if (!opts.includeLine) return rewritten;
+
+  const moodLine = pickMoodLine(mood);
+  if (!moodLine) return rewritten;
+
+  // Try sentence-based insertion
+  const sentenceSplit = rewritten.split(/([.!?])/);
+  const sentenceCount = Math.floor(sentenceSplit.length / 2);
+
+  if (sentenceCount > 1) {
+    const insertIndex = Math.floor(Math.random() * sentenceCount) * 2;
+    const before = sentenceSplit.slice(0, insertIndex + 2).join("");
+    const after = sentenceSplit.slice(insertIndex + 2).join("");
+    return `${before} ${moodLine} ${after}`.replace(/\s+/g, " ");
+  }
+
+  // Fallback: insert at comma
+  const commaIndex = rewritten.indexOf(",");
+  if (commaIndex !== -1) {
+    return (
+      rewritten.slice(0, commaIndex + 1) +
+      ` ${moodLine}` +
+      rewritten.slice(commaIndex + 1)
+    ).replace(/\s+/g, " ");
+  }
+
+  // Final fallback: append
+  return `${rewritten} ${moodLine}`;
+}
+
+function pickMoodLine(mood) {
+  const moodLines = {
+    hopeful: [
+      "There’s a quiet optimism in the air, as if something good is just around the corner.",
+      "The day feels like it’s leaning toward something bright."
+    ],
+    calm: [
+      "Everything feels steady, like the world is breathing in sync with you.",
+      "A gentle stillness settles over the surroundings."
+    ],
+    tense: [
+      "Yet beneath the surface, something feels off — like the world is holding its breath.",
+      "Every sound seems sharper, every shadow deeper."
+    ],
+    despair: [
+      "Even the light seems reluctant, and silence weighs heavier than usual.",
+      "A heavy gloom hangs in the air."
+    ]
+  };
+
+  const lines = moodLines[mood];
+  if (!lines || lines.length === 0) return "";
+
+  // Ensure state tracker exists
+  if (typeof state.lastMoodLine !== "string") state.lastMoodLine = "";
+
+  let choice;
+  let attempts = 0;
+
+  do {
+    choice = lines[Math.floor(Math.random() * lines.length)];
+    attempts++;
+  } while (choice === state.lastMoodLine && attempts < 5);
+
+  state.lastMoodLine = choice;
+  return choice;
+}
+
+function getPersonalReputationPatterns() {
+  return PERSONAL_REP_PATTERNS;
+}
+
+  function modifyReputation(text, state) {
+    for (const category in URT_LEXICON) {
+      for (const pattern of URT_LEXICON[category]) {
+        if (pattern.test(text)) {
+          applyRepCategory(category, state);
+          ensureWorldRepCard();
+          updateWorldRepCard();
+          break;
+        }
+      }
+    }
+  }
+
+  // Clamp helper
+  function clamp(val, min, max) {
+    return Math.max(min, Math.min(max, val));
+  }
+
+  function getLore(loc, origin) {
+    const entry = LORE[loc];
+    if (!entry || typeof entry !== "object") return `You have learned of ${loc}, but know little about it yet.`;
+    return entry[origin] || entry.default || `You have learned of ${loc}, but know little about it yet.`;
+  }
+
+  function modifyPersonalReputation(text, state) {
+    let age = (state.ages?.player ?? 0);
+    let isInfant = getAgeBracket(age) === "infant";
+    for (const p of PERSONAL_REP_PATTERNS) {
+      if (p.regex.test(text)) {
+        for (const cat in p.changes) {
+          if (isInfant) {
+            if (!["Innocent","Affectionate","Curious","Playful",
+                  "Clever","Brave","Mischievous","Charmer"].includes(cat)) continue;
+            let current = state.reputation[cat] || 0;
+            let delta = Math.sign(p.changes[cat]);
+            let next = current + delta;
+            state.reputation[cat] = clamp(next, -3, 3);
+          } else {
+            let current = state.reputation[cat] || 0;
+            let next = current + p.changes[cat];
+            state.reputation[cat] = clamp(next, -100, 100);
+            ensurePersonalRepCard();
+            updatePersonalRepCard();
+          }
+        }
+      }
+    }
+  }
+
+  function applyRepCategory(category, state) {
+  const delta = REP_CATEGORY_CHANGES[category];
+  if (!delta) return;
+  const before = { ...state.factions };
+  for (const faction in delta) {
+    state.factions[faction] = (state.factions[faction] || 0) + delta[faction];
+  }
+  state.lastReputationChange = trackReputationChanges(before, state.factions);
+
+  // Mood reaction to reputation change
+  const totalChange = Object.values(state.lastReputationChange).reduce((a,b) => a+b, 0);
+  if (totalChange > 0) state.mood = "hopeful";
+  else if (totalChange < 0) state.mood = "tense";
+}
+
+  function getReputationSummary(state) {
+    return Object.entries(state.factions).map(([faction, score]) => `${faction}: ${score}`).join(" | ");
+  }
+
+  function trackReputationChanges(before, after) {
+    const delta = {};
+    for (const key in after) {
+      const diff = (after[key] || 0) - (before[key] || 0);
+      if (diff !== 0) delta[key] = diff;
+    ensurePersonalRepCard();
+    updatePersonalRepCard();
+    }
+    return delta;
+  }
+
+if (!state.timeHistory) state.timeHistory = [];
+
+function advanceTimeWithHistory(minutes) {
+  if (typeof advanceTime === "function") {
+    // Save snapshot before advancing
+    state.timeHistory.push({
+      worldClock: { ...state.worldClock },
+      minutes
+    });
+
+    advanceTime(minutes);
+    updateTimeCard();
+    // 🎯 Add this line to make mood change dynamically
+    updateMoodByTime();
+
+    // Optional: show the change immediately
+    if (typeof output !== "undefined") {
+      output.push(formatMoodImmersive(state.mood));
+    }
+  }
+}
+function formatMoodImmersive(mood) {
+  if (!mood) return "";
+  const lines = { hopeful: "A quiet optimism fills the air.", calm: "A gentle stillness settles.", tense: "Something feels off.", despair: "A heavy gloom lingers." };
+  return lines[mood] || "";
+}
+
+function weightedPick(weightedMoods) {
+  const total = weightedMoods.reduce((sum, [, w]) => sum + w, 0);
+  let roll = Math.random() * total;
+  for (const [mood, weight] of weightedMoods) {
+    if ((roll -= weight) <= 0) return mood;
+  }
+}
+
+function updateMoodByTime() {
+  // Only change mood 30% of the time when called
+  if (Math.random() < 0.3) {
+    const h = state.worldClock.hour;
+
+    let weightedMoods;
+    if (h >= 5 && h < 12) weightedMoods = [["hopeful", 4], ["calm", 3], ["tense", 2], ["despair", 1]];
+    else if (h >= 12 && h < 18) weightedMoods = [["calm", 4], ["hopeful", 3], ["tense", 2], ["despair", 1]];
+    else if (h >= 18 && h < 22) weightedMoods = [["tense", 4], ["calm", 3], ["hopeful", 2], ["despair", 2]];
+    else weightedMoods = [["despair", 4], ["tense", 3], ["calm", 2], ["hopeful", 1]];
+
+    state.mood = weightedPick(weightedMoods);
+  }
+}
+
+
+function undoLastTimeAdvance() {
+  if (state.timeHistory && state.timeHistory.length > 0) {
+    const last = state.timeHistory.pop();
+    state.worldClock = { ...last.worldClock };
+    state.lastActionMinutes = 0; // clear since we're rolling back
+    updateTimeCard();
+  }
+}
+
+ // === Input Modifier ===
+ function inputModifier(text) {
+  if (!state.worldClock) state.worldClock = { year: 1454, month: 3, day: 27, hour: 7, minute: 0 };
+  if (!state.pendingMinutes) state.pendingMinutes = 0;
+
+  initWorldReputation(state);
+  initPersonalReputation(state);
+
+  // --- NEW: Item usage detection ---
+  const usePattern = /^(use|eat|drink|equip)\s+(.+)/i;
+  const match = text.trim().match(usePattern);
+  if (match) {
+    const itemName = match[2].trim();
+    useItem(itemName); // <-- Calls your inventory system
+    return { text };   // Skip the rest of the logic for this turn
+  }
+
+  const oldWorldRep = { ...state.factions };
+  const oldPersonalRep = { ...state.reputation };
+
+  const patterns = getPersonalReputationPatterns();
+  let age = (state.ages?.player ?? 0);
+  let isInfant = getAgeBracket(age) === "infant";
+
+  for (const pattern of patterns) {
+    if (pattern.regex.test(text)) {
+      for (const cat in pattern.changes) {
+        let current = state.reputation[cat] || 0;
+        let next = current + pattern.changes[cat];
+        state.reputation[cat] = isInfant
+          ? clamp(next, -3, 3)
+          : clamp(next, -100, 100);
+      }
+      logPersonalRepChange(text, pattern.changes);
+    }
+  }
+
+  state.lastWorldReputationChange = trackReputationChanges(oldWorldRep, state.factions);
+  state.lastPersonalReputationChange = trackReputationChanges(oldPersonalRep, state.reputation);
+
+ // --- Location inquiry detection ---
+if (!state.locations) state.locations = [];
+
+// Only keep valid, non-empty location names
+const allLocations = [...new Set(
+  MINI_EVENTS
+    .map(e => e.location)
+    .filter(loc => typeof loc === "string" && loc.trim().length > 0)
+)];
+
+const inquiryPattern = /\b(where(?:\s+is|'s)|tell\s+me\s+about|what(?:'s|\s+is)\s+in|describe|info(?:rmation)?\s+on)\b/i;
+
+if (inquiryPattern.test(text)) {
+  for (const loc of allLocations) {
+    const locPattern = new RegExp(`\\b${loc}\\b`, "i");
+    if (locPattern.test(text) && !state.locations.includes(loc)) {
+      state.locations.push(loc);
+
+      // Arrival-based description
+      const arrivalDescription = getLore(loc, state.currentLocation || "default");
+      addStoryCard(loc, '', 'Location', loc, arrivalDescription);
+
+      state.message = `📍 Location learned from inquiry: ${loc}`;
+
+      // Inquiry-based description with fallback
+      const description = LORE[loc] || `You have learned of ${loc}, but know little about it yet.`;
+      addStoryCard(loc, '', 'Location', loc, description);
+    }
+  }
+}
+
+  // --- Handle actions if not skipping ---
+  let mins = getCompoundActionMinutes(text);
+  if (!mins) {
+    if (!text.trim()) {
+      mins = 2;
+    } else if (
+      /^["“”']/m.test(text.trim()) ||
+      /\byou (say|ask|reply|respond|murmur|shout|whisper)\b/i.test(text)
+    ) {
+      mins = 3;
+    } else {
+      mins = 2;
+    }
+  }
+  if (Array.isArray(mins)) {
+    mins = mins[Math.floor(Math.random() * mins.length)];
+  }
+  advanceTime(mins);
+  state.lastActionMinutes = mins;
+
+  state.lastInteraction = text.toLowerCase();
+
+  return { text };
+}
+  // --- Helper: Rep Change Logger ---
+  function logPersonalRepChange(text, changes) {
+    if (!state.reputationLog) state.reputationLog = [];
+    const summary = Object.entries(changes)
+      .map(([trait, val]) => `${trait} ${val >= 0 ? "+" : ""}${val}`)
+      .join(", ");
+    state.reputationLog.push({
+      timestamp: Date.now(),
+      action: text.slice(0, 100),
+      effect: changes,
+      summary,
+    });
+  }
+
+// Helper: Immersive rep change narration
+function getRepChangeNarrative(personalDelta) {
+  if (!personalDelta || Object.keys(personalDelta).length === 0) return "";
+
+  const traitPhrases = {
+    Charmer: [
+      "Your presence draws smiles and nods of approval.",
+      "Whispers of admiration follow you discreetly."
+    ],
+    Honorable: [
+      "Your actions inspire respect among Hylians and Twili alike.",
+      "A quiet sense of duty marks your steps."
+    ],
+    Rogue: [
+      "A shadow of cunning trails your movements.",
+      "Murmurs of mischief reach those nearby."
+    ],
+    Dominant: [
+      "You stand with a commanding presence, even the bravest pause.",
+      "Others instinctively heed your lead."
+    ],
+    Submissive: [
+      "You move with humility, allowing others to take the lead.",
+      "Your gentle deference is quietly noted."
+    ],
+    Prankster: [
+      "A playful glint dances in your eyes, inviting harmless fun.",
+      "Laughter seems to follow wherever you wander."
+    ],
+    Curious: [
+      "Your eyes catch details others miss in the forests and temples.",
+      "Questions bubble within, drawing attention and guidance."
+    ],
+    Innocent: [
+      "A soft, trusting aura surrounds you, even among wary villagers.",
+      "Your gentle nature evokes care and protection."
+    ],
+    Mischievous: [
+      "Tiny acts of trickery bring quiet delight and occasional trouble.",
+      "A secretive grin hints at playful schemes."
+    ],
+    Affectionate: [
+      "Your warmth draws others closer, friends and allies alike.",
+      "Kind gestures are met with gratitude and smiles."
+    ],
+    Defiant: [
+      "You resist the unfair, even when others hesitate.",
+      "A spark of rebellion marks your choices."
+    ],
+    Brave: [
+      "Your courage steadies even the most frightened.",
+      "Boldness flows through your every step."
+    ],
+    Clever: [
+      "Your mind navigates puzzles and obstacles with ease.",
+      "Solutions emerge where others see only confusion."
+    ],
+    Playful: [
+      "A lighthearted spirit lifts the mood around you.",
+      "Joy bubbles up, coloring even tense moments."
+    ]
+  };
+
+  let lines = [];
+  for (const [trait, delta] of Object.entries(personalDelta)) {
+    if (delta > 0 && traitPhrases[trait]) lines.push(traitPhrases[trait][0]);
+    else if (delta < 0 && traitPhrases[trait]) lines.push(traitPhrases[trait][1]);
+  }
+
+  // Randomly pick 1–2 lines for variety, still concise
+  if (lines.length > 2) lines = lines.sort(() => Math.random() - 0.5).slice(0, 2);
+
+  return lines.join(" ");
+}
+
+// === Context Modifier (AI instructions only, not shown to player) ===
+function contextModifier(text) {
+  initWorldReputation(state);
+  initPersonalReputation(state);
+ 
+  return {
+    text: [text].filter(Boolean).join("\n\n")
+  };
+}
+
+function applyMiniEventReward(event) {
+  if (!state.inventory) state.inventory = [];
+  if (typeof state.stamina !== "number") state.stamina = 100;
+
+  switch (event.key) {
+   /**
+ * applyMiniEventReward(event)
+ *
+ * This function applies the outcome of a MINI_EVENT to the player's state.
+ * It handles inventory changes, stat boosts, reputation shifts, and feedback messages.
+ *
+ * Parameters:
+ * - event: { key: string, location: string, text: string, reward?: string }
+ *   • key → unique identifier for the mini event (must match MINI_EVENTS entry)
+ *   • location → where the event occurs (for context only)
+ *   • text → narrative description of the event
+ *   • reward (optional) → fallback reward text if no explicit case is defined
+ *
+ * Behavior:
+ * - Uses a switch statement keyed on `event.key` to determine the reward logic.
+ * - Updates `state` with:
+ *   • inventory additions (items, materials, lore notes, etc.)
+ *   • temporary stat boosts (stamina, strength, swim speed, magic, combat skill)
+ *   • reputation changes (via modifyReputation or modifyPersonalReputation)
+ *   • feedback messages (emoji + short description for immersion)
+ * - Calls `updateInventoryCard()` at the end to refresh UI/visuals.
+ *
+ * Example:
+ * case "fishingLakeHylia":
+ *   state.inventory.push("Fresh Fish");
+ *   state.message = "🎣 You caught a fish!";
+ *   break;
+ *
+ * Notes for Creators:
+ * - Add new cases for each new MINI_EVENT key you introduce.
+ * - Keep rewards small but meaningful (items, boosts, minor reputation).
+ * - Always set `state.message` to give the player immediate feedback.
+ * - Use emojis consistently to make feedback fun and scannable.
+ * - If no case matches, the function falls back to `event.reward` (generic handling).
+ * - Ensure helper functions like `modifyReputation` and `modifyPersonalReputation`
+ *   are defined elsewhere in your system.
+ *
+ * Design Philosophy:
+ * - MINI_EVENTS should feel rewarding but lightweight — they add flavor and
+ *   incremental progress without overshadowing SPECIAL_EVENTS or major story beats.
+ */
+
+  }
+    updateInventoryCard();
+}
+
+
+// === Output Modifier (immersive, no numbers, shows clock and narrative rep change) ===
+function outputModifier(text) {
+  initWorldReputation(state);
+  initPersonalReputation(state);
+
+  // Undo / Erase detection
+  if (text === state._lastOutputText && text.trim() !== "") state._justUndid = true;
+  if (!state.worldClock) state._justErased = true;
+  if (state._justUndid || state._justErased) {
+    undoLastTimeAdvance();
+    state._justUndid = false;
+    state._justErased = false;
+  }
+  state._lastOutputText = text;
+
+  const worldDelta = state.lastWorldReputationChange || {};
+  const personalDelta = state.lastPersonalReputationChange || {};
+  const wc = state.worldClock;
+
+  // Auto‑advance time
+  if (typeof advanceTime === "function") {
+    let minutesPassed = Math.floor(Math.random() * 3) + 1;
+    advanceTime(minutesPassed);
+    state.lastActionMinutes = minutesPassed;
+
+    // Throttled mood updates
+    if (typeof updateMoodByTime === "function") {
+      const currentTime = wc.hour * 60 + wc.minute;
+      const lastTime = state.lastMoodUpdateTime || 0;
+      const minutesSinceLastMood = currentTime - lastTime;
+      const adjustedMinutes = minutesSinceLastMood < 0 ? (1440 + minutesSinceLastMood) : minutesSinceLastMood;
+      const threshold = state.nextMoodThreshold || (30 + Math.floor(Math.random() * 31));
+
+      if (adjustedMinutes >= threshold) {
+        updateMoodByTime();
+        state.lastMoodUpdateTime = currentTime;
+        state.nextMoodThreshold = 30 + Math.floor(Math.random() * 31);
+      }
+    }
+
+    if (typeof updateTimeCard === "function") updateTimeCard();
+  }
+
+  // Build immersive narrative parts
+  let narrativeParts = [];
+
+  if (wc && state.lastActionMinutes > 0) {
+    if (wc.hour !== state.lastNarratedHour) {
+      narrativeParts.push(describeTimeNaturally(wc));
+      state.lastNarratedHour = wc.hour;
+    }
+  }
+  if (state._justUndid || state._justErased) {
+    state.lastMoodUpdateTime = 0;
+    state.nextMoodThreshold = 30 + Math.floor(Math.random() * 31);
+  }
+  if (Object.keys(worldDelta).length > 0) narrativeParts.push(formatWorldRepImmersive(worldDelta));
+  if (Object.keys(personalDelta).length > 0) narrativeParts.push(formatPersonalRepImmersive(personalDelta));
+
+  // Clear deltas
+  state.lastWorldReputationChange = {};
+  state.lastPersonalReputationChange = {};
+
+  // Start with base AI output + immersive parts
+  let outText = text;
+  if (narrativeParts.length > 0) outText += "\n\n" + narrativeParts.join(" ");
+
+  // === Zelda-specific systems ===
+  if (!state.locations) state.locations = [];
+  if (!state.creatures) state.creatures = [];
+  if (state.sanity === undefined) state.sanity = 100;
+
+  const actionType = (info && info.actionType) ? info.actionType : '';
+  const isDoOrSay = actionType === 'do' || actionType === 'say';
+  const isRetry = info && info.isRetry;
+  const isContinue = info && info.isContinue;
+
+  // Sanity system
+  const sanityTriggers = [
+    'forbidden magic', 'eldritch', 'unnameable', 'beyond comprehension',
+    'your mind fractures', 'your thoughts twist', 'the veil tears', 'reality bends',
+    'your core warps', 'the sky bleeds', 'time folds'
+  ];
+  const sanityTriggerPattern = new RegExp(sanityTriggers.join('|'), 'i');
+  if (sanityTriggerPattern.test(text)) {
+    const roll = Math.floor(Math.random() * 20);
+    if (roll === 0) {
+      const loss = Math.floor(Math.random() * 10 + 5);
+      state.sanity = Math.max(0, state.sanity - loss);
+      state.message = `🧠 Sanity decreased (${loss}): ${state.sanity}`;
+    }
+  }
+
+  // Random twist system
+  if (isDoOrSay && !isContinue) {
+    if (isRetry || state.twistRoll === undefined) {
+      state.twistRoll = Math.floor(Math.random() * 200);
+    }
+    if (state.twistRoll === 0) {
+      const twists = [
+        'Suddenly, you spot a monster lurking in the mist.',
+        'A strange hum fills the air—magic is warping nearby reality.',
+        'A cloaked figure watches you from the treeline, then vanishes.',
+        'The ground trembles. Something massive stirs beneath Yggdrasil.',
+        'A glowing rune pulses beneath your feet. You feel time slow.',
+        'A wild magic beast bursts from the underbrush, eyes glowing.',
+        'The sky darkens unnaturally. A storm of mana begins to form.',
+        'You hear chanting in an unknown tongue echoing from the ruins.',
+        'A portal flickers open nearby—briefly revealing another realm.',
+        'A raven lands beside you and speaks a single word: "Run."',
+        'The wind shifts. You smell ash. Something ancient has awakened.',
+        'A forgotten shrine reveals itself, its guardian still watching.',
+        'You step into a clearing—and the world around you freezes.',
+        'A settlement appears where none existed before. Its lights flicker.',
+        'Your shadow moves independently for a moment, then returns.',
+        'A voice whispers from your satchel: "You are not alone."',
+        'The trees bend toward you, as if listening.',
+        'A spectral beast crosses your path, leaving frost in its wake.',
+        'You feel a sudden pull—your magic core pulses violently.',
+        'A distant horn sounds. Something is hunting nearby.'
+      ];
+      outText = twists[Math.floor(Math.random() * twists.length)];
+    }
+  }
+
+  // Helper for description extraction
+  const extractDescription = (rawText, name) => {
+    const windowSize = 100;
+    const index = rawText.indexOf(name);
+    if (index === -1) return 'No description available.';
+    const start = Math.max(0, index - windowSize);
+    const end = Math.min(rawText.length, index + name.length + windowSize);
+    const context = rawText.slice(start, end);
+    const descMatch = context.match(/(?:is|was|appears|looks|seems|stands|rises|shaped like|with|covered in|bearing)\s+([^.,;]+)/i);
+    return descMatch ? descMatch[1].trim() : 'No description available.';
+  };
+
+  // Location detection
+const settlementCues = [
+  // Formal descriptors
+  'the\\s+village\\s+of',
+  'the\\s+town\\s+of',
+  'the\\s+city\\s+of',
+  'the\\s+hamlet\\s+of',
+  'the\\s+fortress\\s+of',
+  'the\\s+capital\\s+of',
+  'the\\s+port\\s+of',
+  'the\\s+settlement\\s+of',
+  'the\\s+outpost\\s+of',
+
+  // Narrative / conversational
+  'arriv(?:e|es|ed|ing)?\\s+(?:at|in)',
+  'you\\s+arriv(?:e|es|ed|ing)?\\s+(?:at|in)',
+  'reach(?:es|ed|ing)?',
+  'you\\s+reach(?:es|ed|ing)?',
+  'enter(?:s|ed|ing)?',
+  'you\\s+enter(?:s|ed|ing)?',
+  'step(?:s|ped|ping)?\\s+(?:into|inside)',
+  'you\\s+step(?:s|ped|ping)?\\s+(?:into|inside)',
+  'make(?:s|d|ing)?\\s+your\\s+way\\s+(?:to|toward)',
+  'heading\\s+toward',
+  'headed\\s+toward',
+  'find(?:s|ing)?\\s+yourself\\s+(?:in|at)',
+  'come(?:s|came|coming)?\\s+upon',
+  'settlement\\s+called',
+  'place\\s+called',
+  'known\\s+(?:as|locally\\s+as)'
+];
+
+const landmarkCues = [
+  // Formal descriptors
+  'the\\s+ruins\\s+of',
+  'the\\s+shrine\\s+of',
+  'the\\s+spire\\s+of',
+  'the\\s+grove\\s+of',
+  'the\\s+monolith\\s+of',
+  'the\\s+temple\\s+of',
+  'the\\s+tower\\s+of',
+  'the\\s+canyon\\s+of',
+  'the\\s+cliffs\\s+of',
+  'the\\s+falls\\s+of',
+  'the\\s+bridge\\s+of',
+  'the\\s+pass\\s+of',
+  'the\\s+cavern\\s+of',
+  'the\\s+cave\\s+of',
+  'the\\s+crater\\s+of',
+
+  // Narrative / conversational
+  'landmark\\s+known\\s+as',
+  'place\\s+known\\s+as',
+  'spot\\s+known\\s+as',
+  'site\\s+known\\s+as',
+  'you\\s+come\\s+across',
+  'you\\s+come\\s+upon',
+  'you\\s+stumble\\s+upon',
+  'you\\s+discover',
+  'you\\s+find',
+  'you\\s+find\\s+yourself\\s+at',
+  'you\\s+find\\s+yourself\\s+before',
+  'standing\\s+before',
+  'standing\\s+at',
+  'approach(?:es|ed|ing)?\\s+the',
+  'approaching\\s+the',
+  'looking\\s+up\\s+at',
+  'looking\\s+out\\s+over'
+];
+
+  const cuePatterns = [...settlementCues, ...landmarkCues].map(pattern =>
+  new RegExp(`${pattern}\\s+([A-Z][a-zA-Z'\\- ]{2,})`, 'gi')
+);
+
+for (const pattern of cuePatterns) {
+  let match;
+  while ((match = pattern.exec(text)) !== null) {
+    const name = match[1].trim();
+    const cue = match[0].toLowerCase();
+    const type = settlementCues.some(c => cue.includes(c)) ? 'Settlement' : 'Landmark';
+
+    // ✅ Only proceed if the text contains an arrival/travel action
+    const actionContext = /(arrive|enter|travel|head|go|walk|run|make your way)/i;
+    if (!actionContext.test(text)) continue;
+
+    if (!state.locations.includes(name)) {
+      state.locations.push(name);
+
+      const description = extractDescription(text, name);
+      const finalDescription = description === 'No description available.'
+        ? `You have learned of ${name}, but know little about it yet.`
+        : description;
+
+      addStoryCard(name, '', type, name, `Appearance: ${finalDescription}`);
+      state.message = `📍 New ${type} added: ${name}`;
+    }
+  }
+}
+
+  // Creature detection
+const creatureCues = [
+  'a creature known as', 'a beast called', 'a magic beast named', 'a monster named'
+];
+const creaturePattern = new RegExp(`(${creatureCues.join('|')})\\s+([A-Z][a-zA-Z'\\- ]{2,})`, 'gi');
+
+let match;
+while ((match = creaturePattern.exec(text)) !== null) {
+  const cue = match[1].toLowerCase();
+  const name = match[2].trim();
+  const type = cue.includes('magic') || cue.includes('mana') || cue.includes('core')
+    ? 'Magic Beast'
+    : 'Monster';
+
+  if (!state.creatures.includes(name)) {
+    state.creatures.push(name);
+
+    const description = extractDescription(text, name);
+
+    addStoryCard(
+      name,   // trigger key is just the name
+      '',     // entry left blank
+      type,
+      name,   // title is just the name
+      `Appearance: ${description}`
+    );
+
+    state.message = `👾 New ${type} added: ${name}`;
+  }
+}
+
+// === Mini-event detection ===
+if (!state.completedMiniEvents) state.completedMiniEvents = [];
+
+for (const event of MINI_EVENTS) {
+  if (
+    state.locations.includes(event.location) &&
+    !state.completedMiniEvents.includes(event.key) &&
+    text.includes(event.location)
+  ) {
+    outText += `\n\n${event.text}`;
+    state.completedMiniEvents.push(event.key);
+    applyMiniEventReward(event);
+  }
+}
+
+  // === Mood tone rewrite + mood line ===
+  if (state.mood) outText = applyMoodTone(outText, state.mood, { includeLine: false });
+
+  let showMoodLine = false;
+
+  // Condition 1: Mood changed
+  if (state.mood !== state.lastMoodShown) {
+    showMoodLine = true;
+    state.lastMoodShown = state.mood;
+    state.turnsSinceMoodLine = 0;
+  }
+  // Condition 2: X turns passed since last line
+  else if (state.turnsSinceMoodLine >= 10) {
+    showMoodLine = true;
+    state.turnsSinceMoodLine = 0;
+  }
+  // Increment turn counter
+  else {
+    state.turnsSinceMoodLine++;
+  }
+
+  // Append mood line if triggered
+  if (showMoodLine) {
+    outText += " " + pickMoodLine(state.mood);
+  }
+
+  return { text: outText };
+}
+
+  // === Expose globally ===
+globalThis.inputModifier = inputModifier;
+globalThis.contextModifier = contextModifier;
+globalThis.outputModifier = outputModifier;
+
+globalThis.ensureTimeCard = ensureTimeCard;
+globalThis.updateTimeCard = updateTimeCard;
+
+globalThis.ensurePersonalRepCard = ensurePersonalRepCard;
+globalThis.updatePersonalRepCard = updatePersonalRepCard;
+
+globalThis.ensureWorldRepCard = ensureWorldRepCard;
+globalThis.updateWorldRepCard = updateWorldRepCard;
+
+globalThis.ensureBirthdayCard = ensureBirthdayCard;
+globalThis.refreshBirthdayCard = refreshBirthdayCard; // so you can rebuild the list anytime
+globalThis.onNewDay = onNewDay; // so you can trigger the daily birthday check manually
+globalThis.learnBirthday = learnBirthday; // so you can add new birthdays dynamically
+
+})();
+
+
+onLibrary_ReputeX();
+
+function onLibrary_ReputeX() {
+	if (state.reputexEnabled === undefined) {
+		const S = (typeof MainSettings !== "undefined" && MainSettings.InnerSelf) ? MainSettings.InnerSelf : {};
+		state.reputexEnabled = (typeof S.IS_REPUTEX_ENABLED_BY_DEFAULT === "boolean") ? S.IS_REPUTEX_ENABLED_BY_DEFAULT : false;
+	}
+}
+
+function onInput_ReputeX(text) {
+	if (!state.reputexEnabled || typeof globalThis.inputModifier !== "function") return text;
+	try {
+		const result = globalThis.inputModifier(text);
+		return (result && typeof result.text === "string") ? result.text : text;
+	} catch (e) {
+		log("ReputeX inputModifier: " + (e?.message || e));
+		return text;
+	}
+}
+
+function onContext_ReputeX(text) {
+	if (!state.reputexEnabled || typeof globalThis.contextModifier !== "function") return text;
+	try {
+		const result = globalThis.contextModifier(text);
+		return (result && typeof result.text === "string") ? result.text : text;
+	} catch (e) {
+		log("ReputeX contextModifier: " + (e?.message || e));
+		return text;
+	}
+}
+
+function onOutput_ReputeX(text) {
+	if (!state.reputexEnabled || typeof globalThis.outputModifier !== "function") return text;
+	try {
+		const result = globalThis.outputModifier(text);
+		return (result && typeof result.text === "string") ? result.text : text;
+	} catch (e) {
+		log("ReputeX outputModifier: " + (e?.message || e));
+		return text;
 	}
 }
 

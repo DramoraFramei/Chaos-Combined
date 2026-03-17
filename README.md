@@ -12,6 +12,7 @@ there are 5 scripts combined in this script.
 - Localized Language by LewdLeah
 - Narrative Guidance overhaul by Purplejumps + library addition by myself Dramora9879
 - True Auto Stats by Yi1i1i
+- ReputeX Engine by Lothens, LewdLeah, MillennialJesus (reputation, world clock, events)
 
 ## What Makes This Special Or Unique?
 
@@ -35,7 +36,7 @@ Version: 0.0.01-Pre-Alpha
 ## Next Update
 
 Version: 0.0.02-Pre-Alpha
-Changes Planned: Add ReputeX Engine
+Changes Planned: Comment what I should add next
 
 ## Test Scenario
 

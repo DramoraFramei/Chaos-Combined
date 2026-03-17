@@ -14,6 +14,7 @@ else {
 InnerSelf("context");
 const modifier = (text) => {
 	text = LocalizedLanguages("context", text);
+	text = onContext_ReputeX(text);
 	text = onContext_TAS(text);
 	// NGO: inject story phase prompt into context
 	if (state.ngoEnabled && state.originalAuthorsNote) {

@@ -110,6 +110,7 @@ const modifier = (text) => {
 		log("Heat: " + state.heat)
 		log("Temperature: " + state.storyTemperature)
 	}
+	text = onOutput_ReputeX(text);
 	text = onOutput_TAS(text);
 	return {
 		text
