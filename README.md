@@ -32,6 +32,11 @@ popular scripts.
 
 Version: 0.0.01-Pre-Alpha
 
+## Next Update
+
+Version: 0.0.02-Pre-Alpha
+Changes Planned: Add ReputeX Engine
+
 ## Test Scenario
 
 I created a Scenario to test it called [Greek Hero Sandbox](https://play.aidungeon.com/scenario/rnTdZJ8CxZc0/greek-hero-sandbox?share=true&published=true)
