@@ -34556,8 +34556,7 @@ function learnBirthday(name, month, day, age) {
   }
 }
 
-// Initialize card on load
-ensureBirthdayCard();
+// Birthday card creation deferred to contextModifier - only when ReputeX is enabled
 
  function onNewMonth() {
   let wc = state.worldClock;
@@ -34700,8 +34699,7 @@ function useItem(itemName) {
 updateInventoryCard();
 }
 
-ensureInventoryCard();
-updateInventoryCard();
+// Inventory card creation deferred to contextModifier - only when ReputeX is enabled
 
 const actionMinutes = {
   // Eating & drinking (Zelda foods)
@@ -34989,8 +34987,7 @@ function updatePersonalRepCard() {
       .join("\n");
 }
 
-ensurePersonalRepCard();
-updatePersonalRepCard();
+// Personal Reputation card creation deferred to contextModifier - only when ReputeX is enabled
 
 // Make sure every faction has a numeric score in state.factions
 function ensureFactionScores() {
@@ -35651,12 +35648,14 @@ function contextModifier(text) {
   ensureWorldRepCard();
   checkScheduledEvents();
   ensureBirthdayCard();
+  ensurePersonalRepCard();
   ensureInventoryCard();
   recalcAgesFromCurrentDate();
   refreshBirthdayCard();
   checkBirthdayEvents();
   updateTimeCard();
   updateWorldRepCard();
+  updatePersonalRepCard();
   updateInventoryCard();
 
   return {
