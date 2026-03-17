@@ -1630,6 +1630,7 @@ function InnerSelf(hook) {
 			}
 		} else if (IS.AC.enabled) {
 			IS.AC.enabled = false;
+			if (state.InnerSelf?.AC) state.InnerSelf.AC.showEditToEnable = false;
 			// AC was just disabled, clean up its cards ;)
 			for (let i = storyCards.length - 1; - 1 < i; i--) {
 				const card = storyCards[i];
@@ -6489,6 +6490,10 @@ function AutoCards(inHook, inText, inStop) {
 					AC.signal.forceToggle = null;
 					// Auto-Cards has been disabled
 					AC.config.doAC = false;
+					// Mark that we should show "Edit to enable" (user enabled via InnerSelf, then disabled via Configure)
+					state.InnerSelf ??= {};
+					state.InnerSelf.AC ??= {};
+					state.InnerSelf.AC.showEditToEnable = true;
 					// Deconstruct the "Configure Auto-Cards" story card
 					unbanTitle(configureCardTemplate.title);
 					eraseCard(configureCard);
@@ -6953,34 +6958,41 @@ function AutoCards(inHook, inText, inStop) {
 			case "context": {
 				// AutoCards was called within the context modifier
 				advanceChronometer();
-				// Get or construct the "Edit to enable Auto-Cards" story card
 				const enableCardTemplate = getEnableCardTemplate();
-				const enableCard = getSingletonCard(true, enableCardTemplate);
-				banTitle(enableCardTemplate.title);
-				pinAndSortCards(enableCard);
-				if (AC.signal.forceToggle) {
-					enableAutoCards();
-				} else if (enableCard.entry !== enableCardTemplate.entry) {
-					if ((extractSettings(enableCard.entry) ?.enableautocards === true) && (AC.signal.forceToggle !== false)) {
-						// Use optional chaining to check the existence of enableautocards before accessing its value
-						enableAutoCards();
-					} else {
-						// Repair the damaged card entry
-						enableCard.entry = enableCardTemplate.entry;
+				// Only show "Edit to enable Auto-Cards" when user enabled via InnerSelf, then disabled via Configure
+				if (state.InnerSelf?.AC?.showEditToEnable) {
+					const enableCard = getSingletonCard(true, enableCardTemplate);
+					banTitle(enableCardTemplate.title);
+					pinAndSortCards(enableCard);
+					if (AC.signal.forceToggle) {
+						enableAutoCards(enableCard);
+					} else if (enableCard.entry !== enableCardTemplate.entry) {
+						if ((extractSettings(enableCard.entry) ?.enableautocards === true) && (AC.signal.forceToggle !== false)) {
+							enableAutoCards(enableCard);
+						} else {
+							enableCard.entry = enableCardTemplate.entry;
+						}
 					}
+				} else {
+					// Not allowed to show - remove the card if it exists
+					const enableCard = getSingletonCard(false, enableCardTemplate);
+					if (enableCard) {
+						unbanTitle(enableCardTemplate.title);
+						eraseCard(enableCard);
+					}
+					AC.signal.swapControlCards = false;
 				}
 				AC.signal.forceToggle = null;
 				CODOMAIN.initialize(TEXT);
 
-				function enableAutoCards() {
-					// Auto-Cards has been enabled
+				function enableAutoCards(enableCard) {
 					AC.config.doAC = true;
-					// Deconstruct the "Edit to enable Auto-Cards" story card
+					state.InnerSelf ??= {};
+					state.InnerSelf.AC ??= {};
+					state.InnerSelf.AC.showEditToEnable = false;
 					unbanTitle(enableCardTemplate.title);
-					eraseCard(enableCard);
-					// Signal the construction of "Configure Auto-Cards" during the next onOutput hook
+					if (enableCard) eraseCard(enableCard);
 					AC.signal.swapControlCards = true;
-					// Post a success message
 					notify("Enabled! You may now edit the \"Configure Auto-Cards\" story card");
 					return;
 				}
@@ -33963,18 +33975,8 @@ const PERSONAL_REP_PATTERNS = [
   state.factions = state.factions || { ...FACTION_DEFS };
   if (!Array.isArray(state.inventory)) state.inventory = [];
 
-    ensureTimeCard();               // ensures the time card is always declared first
-    parseTimeCardEdits();           // read edits from the card
-    ensureWorldRepCard();           // ensures the World Rep Card is always declared first
-    checkScheduledEvents();         // checks for all events so they don't fire at 12:00AM
-    ensureBirthdayCard();           // ensures the birthday card is always declared first
-    ensureInventoryCard();          // ensures the inventory card is always declared first
-    recalcAgesFromCurrentDate();    // update ages based on new date
-    refreshBirthdayCard();          // update birthday card display
-    checkBirthdayEvents();          // ensures the AI knows its player birthday
-    updateTimeCard();               // write the time card back out
-    updateWorldRepCard();           // updates the world rep display
-    updateInventoryCard();          // updates the inventory display
+  // Card creation deferred to contextModifier - only when ReputeX is enabled (state.reputexEnabled)
+  // This prevents Time Control, World Reputation, Birthday, Inventory cards from appearing when disabled via InnerSelf
 
 function adjustFactionReps(changes) {
   state.factions = state.factions || { ...FACTION_DEFS };
@@ -35642,7 +35644,21 @@ function getRepChangeNarrative(personalDelta) {
 function contextModifier(text) {
   initWorldReputation(state);
   initPersonalReputation(state);
- 
+
+  // Only create/update ReputeX cards when ReputeX is enabled (contextModifier is only called when state.reputexEnabled)
+  ensureTimeCard();
+  parseTimeCardEdits();
+  ensureWorldRepCard();
+  checkScheduledEvents();
+  ensureBirthdayCard();
+  ensureInventoryCard();
+  recalcAgesFromCurrentDate();
+  refreshBirthdayCard();
+  checkBirthdayEvents();
+  updateTimeCard();
+  updateWorldRepCard();
+  updateInventoryCard();
+
   return {
     text: [text].filter(Boolean).join("\n\n")
   };
