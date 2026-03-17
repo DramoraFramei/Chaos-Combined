@@ -34092,12 +34092,14 @@ function randomInt(min, max) {
     let ampm = wc.hour < 12 ? "AM" : "PM";
     const moodText = state.mood ? applyMoodTone("", state.mood).trim() : "";
 
+    const playerAge = (state.ages && typeof state.ages.player === "number") ? String(state.ages.player) : "";
     card.entry = `${TIME_CARD_HEADER}
 - Year: ${wc.year}
 - Month: ${wc.month}
 - Day: ${wc.day}
 - Time: ${String(hour12).padStart(2, "0")}:${String(Number(wc.minute)).padStart(2, "0")} ${ampm}
 - Mood: ${state.mood}
+- Player Age: ${playerAge || "edit or use \${playerAge} tag in plot"}
 ${moodText ? `> ${moodText}` : ""}`;
   }
 
@@ -34138,7 +34140,40 @@ ${moodText ? `> ${moodText}` : ""}`;
       const moodVal = clean.replace("- Mood:", "").trim().toLowerCase();
       if (moodVal) state.mood = moodVal;
     }
+    if (clean.startsWith("- Player Age:")) {
+      const val = parseInt(clean.replace("- Player Age:", "").trim(), 10);
+      if (!isNaN(val) && val >= 0 && val <= 200) {
+        if (!state.ages) state.ages = {};
+        state.ages.player = val;
+      }
+    }
   });
+}
+
+/**
+ * Extracts the player's age from plot/story text when a tag like ${playerAge} or ${age}
+ * is used and replaced with a number. Scans for age-in-player-context patterns.
+ * @param {string} text - The full context/story text (after any ${} tag replacement)
+ * @returns {number|null} - The extracted age, or null if not found
+ */
+function extractPlayerAgeFromPlot(text) {
+  if (typeof text !== "string" || text.length === 0) return null;
+  const patterns = [
+    /\byou\s+are\s+(\d{1,3})\s*years?\s*old\b/i,
+    /\byour\s+age\s+is\s+(\d{1,3})\b/i,
+    /\b(?:player|protagonist|character)\s+age\s*[:\s]*(\d{1,3})\b/i,
+    /\bage\s*[:\s]*(\d{1,3})\s*(?:\s|$|\.|,|;)/gi,
+    /\b(\d{1,3})\s*years?\s*old\b(?:[^.]*(?:\byou\b|\byour\b))?/i,
+    /\b(?:you\s+are\s+a\s+)?(\d{1,3})\s*[-–—]\s*year[- ]old\b/i
+  ];
+  for (const re of patterns) {
+    const m = text.match(re);
+    if (m) {
+      const age = parseInt(m[1], 10);
+      if (!isNaN(age) && age >= 0 && age <= 200) return age;
+    }
+  }
+  return null;
 }
 
 function recalcAgesFromCurrentDate() {
@@ -35047,10 +35082,7 @@ function updateWorldRepCard() {
       .join("\n");
 }
 
-
-// Call these after any world reputation change:
-ensureWorldRepCard();
-updateWorldRepCard();
+// World Reputation card creation deferred to contextModifier - only when ReputeX is enabled
 
 // === Immersive Formatter Helpers ===
 function describeTimeNaturally(wc) {
@@ -35652,6 +35684,20 @@ function contextModifier(text) {
   ensureInventoryCard();
   recalcAgesFromCurrentDate();
   refreshBirthdayCard();
+  // Override player age from Time card (- Player Age: N) or plot (${playerAge} tag); plot takes precedence
+  const ageFromTimeCard = (() => {
+    const card = storyCards.find(c => c?.title === TIME_CARD_NAME);
+    if (!card?.entry) return null;
+    const m = card.entry.match(/- Player Age:\s*(\d{1,3})/);
+    return m ? parseInt(m[1], 10) : null;
+  })();
+  const ageFromPlot = extractPlayerAgeFromPlot(text);
+  const overrideAge = ageFromPlot ?? ageFromTimeCard;
+  if (overrideAge !== null && overrideAge >= 0 && overrideAge <= 200) {
+    if (!state.ages) state.ages = {};
+    state.ages.player = overrideAge;
+    refreshBirthdayCard();
+  }
   checkBirthdayEvents();
   updateTimeCard();
   updateWorldRepCard();
