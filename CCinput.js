@@ -57,8 +57,52 @@ const modifier = (text) => {
 	} else {
 		state.originalAuthorsNote = ""
 
-		const conflictWords = ["attack", "stab", "destroy", "break", "steal", "ruin", "burn", "smash", "sabotage", "disrupt", "vandalize", "overthrow", "assassinate", "plunder", "rob", "ransack", "raid", "hijack", "detonate", "explode", "ignite", "collapse", "demolish", "shatter", "strike", "slap", "obliterate", "annihilate", "corrupt", "infect", "poison", "curse", "hex", "summon", "conjure", "mutate", "provoke", "riot", "revolt", "mutiny", "rebel", "resist", "intimidate", "blackmail", "manipulate", "brainwash", "lie", "cheat", "swindle", "disarm", "fire", "hack", "overload", "flood", "drown", "rot", "dissolve", "slaughter", "terminate", "execute", "drama", "conflict", "evil", "kill", "slay", "defeat", "fight", "doom", "slice", "pain", "dying", "die", "perish", "blood"]
-		const calmingWords = ["calm", "rest", "relax", "meditate", "sleep", "comfort", "hug", "smile", "forgive", "mend", "repair", "plant", "sing", "dance", "celebrate", "collaborate", "share", "give", "donate", "protect", "shelter", "trust", "hope", "dream", "revive", "eat", "drink", "balance", "cheer", "laugh", "play", "build", "bake", "craft", "cook", "empathize", "apologize", "befriend", "admire", "sympathize", "thank", "appreciate", "cherish", "love", "pet", "respect", "restore", "guide", "teach", "learn", "daydream", "wander", "explore", "discover", "reflect", "happy", "joy", "kind", "heal", "help", "assist"]
+		const conflictWords = [
+			"attack", "stab", "destroy", "break", "steal", "ruin", "burn", "smash", "sabotage", "disrupt",
+			"vandalize", "overthrow", "assassinate", "plunder", "rob", "ransack", "raid", "hijack",
+			"detonate", "explode", "ignite", "collapse", "demolish", "shatter", "strike", "slap",
+			"obliterate", "annihilate", "corrupt", "infect", "poison", "curse", "hex", "summon",
+			"conjure", "mutate", "provoke", "riot", "revolt", "mutiny", "rebel", "resist",
+			"intimidate", "blackmail", "manipulate", "brainwash", "lie", "cheat", "swindle",
+			"disarm", "fire", "hack", "overload", "flood", "drown", "rot", "dissolve",
+			"slaughter", "terminate", "execute", "drama", "conflict", "evil", "kill", "slay",
+			"defeat", "fight", "doom", "slice", "pain", "dying", "die", "perish", "blood",
+			"ambush", "betray", "assault", "threaten", "menace", "harass", "bully",
+			"coerce", "extort", "torture", "maim", "wound", "injure", "cripple", "choke",
+			"strangle", "shoot", "bomb", "invade", "besiege", "conquer", "dominate",
+			"oppress", "persecute", "hunt", "track", "pursue", "capture", "kidnap",
+			"imprison", "enslave", "deceive", "frame", "scam", "counterfeit", "forge",
+			"threat", "vengeance", "revenge", "wrath", "rage", "fury", "hatred",
+			"malice", "hostile", "hostility", "aggression", "clash", "brawl",
+			"duel", "skirmish", "war", "battle", "combat", "siege", "destruction",
+			"devastate", "crush", "eradicate", "eliminate", "suppress", "undermine",
+			"backstab", "doublecross", "terrorize", "defy", "retaliate", "suffer",
+			"torment", "scar", "bruise", "fracture", "bleed", "eruption"
+		];
+		const calmingWords = [
+			"calm", "rest", "relax", "meditate", "sleep", "comfort", "hug", "smile",
+			"forgive", "mend", "repair", "plant", "sing", "dance", "celebrate",
+			"collaborate", "share", "give", "donate", "protect", "shelter",
+			"trust", "hope", "dream", "revive", "eat", "drink", "balance",
+			"cheer", "laugh", "play", "build", "bake", "craft", "cook",
+			"empathize", "apologize", "befriend", "admire", "sympathize",
+			"thank", "appreciate", "cherish", "love", "pet", "respect",
+			"restore", "guide", "teach", "learn", "daydream", "wander",
+			"explore", "discover", "reflect", "happy", "joy", "kind",
+			"breathe", "inhale", "exhale", "soothe", "heal", "recover",
+			"renew", "rejuvenate", "nurture", "care", "support", "assist",
+			"encourage", "inspire", "uplift", "comforting", "peace",
+			"serene", "tranquil", "gentle", "soft", "warm", "cozy",
+			"snuggle", "cuddle", "gratitude", "bless", "harmony",
+			"unity", "friendship", "companionship", "patience",
+			"understand", "listen", "accept", "believe", "faith",
+			"gratify", "satisfy", "content", "ease", "relief",
+			"quiet", "still", "calming", "refresh",
+			"bloom", "grow", "flourish", "thrive", "prosper",
+			"sunshine", "meadow", "breeze", "ocean", "forest",
+			"garden", "music", "lullaby", "whisper", "embrace",
+			"together", "happiness", "peaceful", "kindness", "charity"
+		];
 
 		if (state.heat == undefined) {
 			state.heat = state.initialHeatValue

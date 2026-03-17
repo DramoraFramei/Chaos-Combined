@@ -14,9 +14,13 @@ else {
 InnerSelf("context");
 const modifier = (text) => {
 	text = LocalizedLanguages("context", text);
-	text = onContext_TAS(text)
+	text = onContext_TAS(text);
+	// NGO: inject story phase prompt into context
+	if (state.ngoEnabled && state.originalAuthorsNote) {
+		text = text + "\n\n" + state.originalAuthorsNote;
+	}
 	// Any other context modifier scripts can go here
-	let stop = false
+	let stop = false;
 	return {
 		text,
 		stop
